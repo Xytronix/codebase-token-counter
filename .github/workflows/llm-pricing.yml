@@ -23,9 +23,12 @@ jobs:
   preprocess:
     runs-on: ubuntu-latest # Use a standard Linux runner
     steps:
-      # 1. Checkout your repository (optional, but good practice)
+      # 1. Checkout your repository with proper token and fetch depth
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
       # 2. Set up Python environment
       - name: Set up Python
@@ -536,9 +539,18 @@ jobs:
       - name: Commit tracking file
         if: steps.check_changes.outputs.has_changes == 'true'
         run: |
+          # Ensure we're on the correct branch
+          git checkout ${{ github.head_ref || github.ref_name || 'main' }}
+          
+          # Add and commit changes
           git add last_litellm_commit.txt
-          git commit -m "Update LiteLLM tracking to commit ${{ steps.check_changes.outputs.litellm_commit }}" || echo "No changes to commit"
-          git push
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update LiteLLM tracking to commit ${{ steps.check_changes.outputs.litellm_commit }}"
+            git push origin ${{ github.head_ref || github.ref_name || 'main' }}
+            echo "Changes committed and pushed successfully"
+          fi
 
       # 8. Upload the generated JSON as a workflow artifact (only if changes detected)
       - name: Upload Workflow Artifact
