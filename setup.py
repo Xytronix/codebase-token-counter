@@ -8,7 +8,7 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 
 setup(
     name="codebase-token-counter",
-    version="0.1.1",
+    version="0.1.2",
     author="Liatrio",
     description="A tool to count tokens in your codebase",
     long_description=long_description,
