@@ -8,12 +8,14 @@ A comprehensive tool for analyzing codebases to understand their token usage and
 ## Features
 
 ### Core Analysis
+
 - **Local & Remote Analysis**: Analyze both local directories and remote Git repositories
 - **Smart File Detection**: Automatically detects and processes text-based files while ignoring binaries
 - **Intelligent Encoding**: Advanced encoding detection with fallback support for various file formats
 - **Technology Categorization**: Groups files by their technology/language with support for 100+ file types
 
 ### Advanced Display Options
+
 - **Tree Structure**: Hierarchical directory view showing nested relationships
 - **Flat Structure**: Simple list view for quick scanning
 - **Individual File Analysis**: Show top files within each directory
@@ -21,6 +23,7 @@ A comprehensive tool for analyzing codebases to understand their token usage and
 - **Empty Directory Handling**: Show or hide empty directories
 
 ### LLM Context Window Analysis
+
 - **Comprehensive LLM Database**: Automatically updated pricing and context window data from LiteLLM
 - **Popular Models Supported**:
   - **OpenAI**: GPT-4o, GPT-4.1, o1, o3, o4 series
@@ -34,6 +37,7 @@ A comprehensive tool for analyzing codebases to understand their token usage and
 - **Optimization Strategies**: Provides actionable recommendations for large codebases
 
 ### Intelligent Exclusions
+
 - **Smart Defaults**: Automatically excludes common non-source directories (venv, .git, node_modules, etc.)
 - **Custom Exclusions**: Configure directories, files, and extensions to exclude
 - **Pattern Matching**: Support for file pattern exclusions
@@ -133,24 +137,31 @@ token-counter . --files --max-files 20
 The tool provides comprehensive analysis in multiple sections:
 
 ### 1. Extension Breakdown
+
 Shows tokens and file counts grouped by file extension.
 
 ### 2. Technology Distribution
+
 Groups files by programming language/technology (Python, JavaScript, etc.).
 
 ### 3. Directory Analysis
+
 - **Tree View**: Hierarchical structure showing parent-child relationships
 - **Flat View**: Simple list sorted by token count
 - **File Details**: Individual file breakdown when using `--files`
 
 ### 4. Context Window Analysis
+
 Compares your codebase size against popular LLM context windows, showing:
+
 - Input/output token limits
 - Usage percentage
 - Fit status (✅ Fits, ⚠️ Tight, ❌ Too Big)
 
 ### 5. Optimization Strategies
+
 For large codebases, provides specific recommendations:
+
 - Multi-pass analysis approaches
 - Code optimization techniques
 - File prioritization strategies
@@ -161,19 +172,17 @@ For large codebases, provides specific recommendations:
 This project includes automated GitHub workflows:
 
 ### 🔄 LLM Pricing Data Updates (`llm-pricing.yml`)
+
 - **Trigger**: Every 4 hours, on releases, or manual dispatch
 - **Purpose**: Automatically downloads and converts the latest LiteLLM pricing data
 - **Output**: Updates `llm_pricing_data.json` with current model pricing and context windows
 - **Smart Updates**: Only processes when LiteLLM data actually changes
 
-### 🧪 Testing (`test.yml`)
-- **Trigger**: Push to main, pull requests
-- **Purpose**: Runs comprehensive tests across Python 3.8-3.11
-- **Coverage**: Includes installation testing and package building
+### 🧪 CI/CD Pipeline (`ci.yml`)
 
-### 📦 Publishing (`publish.yml`)
-- **Trigger**: Version tags (v*)
-- **Purpose**: Automatically publishes to PyPI after successful tests
+- **Trigger**: Push to main, pull requests, version tags (v*)
+- **Purpose**: Runs comprehensive tests across Python 3.8-3.11, builds packages, and publishes to PyPI on releases
+- **Coverage**: Includes installation testing and package building
 - **Security**: Uses trusted publishing with OpenID Connect
 
 ## Supported File Types
