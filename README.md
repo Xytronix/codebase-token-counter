@@ -66,7 +66,7 @@ Or install from source:
 
 ```bash
 # Clone the repository
-git clone https://github.com/liatrio/codebase-token-counter.git
+git clone https://github.com/Xytronix/codebase-token-counter.git
 cd codebase-token-counter
 
 # Install dependencies
@@ -590,7 +590,7 @@ Contributions are welcome! Areas for improvement:
 
 ```bash
 # Setup development environment
-git clone https://github.com/liatrio/codebase-token-counter.git
+git clone https://github.com/Xytronix/codebase-token-counter.git
 cd codebase-token-counter
 pip install -e .
 
