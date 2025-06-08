@@ -1,0 +1,642 @@
+name: Download LiteLLM Pricing Data and Convert to JSON
+
+# Controls when the workflow will run
+on:
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+  # Runs when a release is published
+  release:
+    types: [published]
+    
+  # Runs every 4 hours to check for LiteLLM changes (but only processes if changes detected)
+  schedule:
+    - cron: '0 */4 * * *'  # Every 4 hours
+    
+  # Runs when pricing-related files change
+  push:
+    paths:
+      - 'convert_litellm_robust.py'
+      - '.github/workflows/preprocess-ts-data.yml'
+
+jobs:
+  preprocess:
+    runs-on: ubuntu-latest # Use a standard Linux runner
+    steps:
+      # 1. Checkout your repository (optional, but good practice)
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Set up Python environment
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9' # Use a stable Python version
+
+      # 3. Check for changes in LiteLLM pricing data
+      - name: Check for LiteLLM changes
+        id: check_changes
+        run: |
+          PRICING_URL="https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
+          
+          # Get latest commit hash of the LiteLLM pricing file
+          LITELLM_COMMIT=$(curl -s "https://api.github.com/repos/BerriAI/litellm/commits?path=model_prices_and_context_window.json&per_page=1" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data[0]['sha'][:8]) if data else 'unknown'")
+          echo "Latest LiteLLM commit: $LITELLM_COMMIT"
+          
+          # Check if we have a previous commit hash stored
+          LAST_COMMIT_FILE="last_litellm_commit.txt"
+          if [ -f "$LAST_COMMIT_FILE" ]; then
+            LAST_COMMIT=$(cat $LAST_COMMIT_FILE)
+            echo "Last processed commit: $LAST_COMMIT"
+          else
+            LAST_COMMIT="none"
+            echo "No previous commit found - first run"
+          fi
+          
+          # Compare commits
+          if [ "$LITELLM_COMMIT" != "$LAST_COMMIT" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Changes detected or manual trigger - proceeding with update"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "$LITELLM_COMMIT" > $LAST_COMMIT_FILE
+          else
+            echo "No changes detected - skipping update"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "litellm_commit=$LITELLM_COMMIT" >> $GITHUB_OUTPUT
+
+      # 4. Download and convert LiteLLM pricing data (only if changes detected)
+      - name: Download and convert LiteLLM pricing data
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          PRICING_URL="https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
+          echo "Downloading LiteLLM pricing data..."
+          curl -s -L "$PRICING_URL" | python3 convert_litellm_robust.py
+          
+          if [ -f "llm_pricing_data.json" ]; then
+            echo "Conversion successful!"
+            echo "Output file size: $(wc -c < llm_pricing_data.json) bytes"
+            echo "Number of providers: $(cat llm_pricing_data.json | python3 -c "import sys, json; data = json.load(sys.stdin); print(len(data.get('providers', [])))")"
+          else
+            echo "::error::Conversion failed - output file not created!"
+            exit 1
+          fi
+
+      # 5. Create the enhanced Python converter script
+      - name: Create Enhanced Python Converter
+        run: |
+          cat > convert_litellm_robust.py << 'EOF'
+          #!/usr/bin/env python3
+          """
+          Enhanced LiteLLM pricing data converter for KOReader
+          Extracts comprehensive model metadata including capabilities, batch pricing, caching costs, and more.
+          Updated for new LiteLLM format with modalities, endpoints, and enhanced capabilities.
+          """
+          
+          import json
+          import re
+          from collections import defaultdict
+          from typing import Dict, Any, List
+          from datetime import datetime
+          
+          def remove_json_comments(text: str) -> str:
+              """Remove // comments from JSON text"""
+              lines = text.split('\n')
+              cleaned_lines = []
+              
+              for line in lines:
+                  # Find the position of // that's not inside a string
+                  in_string = False
+                  escaped = False
+                  comment_pos = -1
+                  
+                  for i, char in enumerate(line):
+                      if escaped:
+                          escaped = False
+                          continue
+                      
+                      if char == '\\':
+                          escaped = True
+                          continue
+                          
+                      if char == '"' and not escaped:
+                          in_string = not in_string
+                          continue
+                          
+                      if char == '/' and i < len(line) - 1 and line[i + 1] == '/' and not in_string:
+                          comment_pos = i
+                          break
+                  
+                  if comment_pos >= 0:
+                      line = line[:comment_pos].rstrip()
+                  
+                  cleaned_lines.append(line)
+              
+              return '\n'.join(cleaned_lines)
+          
+          def get_provider_name(model_name: str, litellm_provider: str) -> str:
+              """Extract standardized provider name"""
+              
+              # Direct provider mappings
+              provider_map = {
+                  'openai': 'OpenAI',
+                  'anthropic': 'Anthropic',
+                  'google': 'Google',
+                  'vertex_ai': 'Google',
+                  'groq': 'Groq',
+                  'cohere': 'Cohere',
+                  'mistral': 'Mistral',
+                  'bedrock': 'Amazon Bedrock',
+                  'bedrock_converse': 'Amazon Bedrock',
+                  'ai21': 'AI21 Labs',
+                  'replicate': 'Replicate',
+                  'together_ai': 'Together.AI',
+                  'fireworks_ai': 'Fireworks',
+                  'perplexity': 'Perplexity',
+                  'anyscale': 'Anyscale',
+                  'deepinfra': 'DeepInfra',
+                  'hyperbolic': 'Hyperbolic',
+                  'sambanova': 'SambaNova Cloud',
+                  'cerebras': 'Cerebras',
+                  'xai': 'xAI',
+                  'novita': 'Novita AI',
+                  'writer': 'Writer',
+                  'moonshot': 'Moonshot AI',
+                  'deepseek': 'DeepSeek',
+                  'reka': 'Reka',
+                  'lambda': 'Lambda Labs',
+                  'liquid': 'Liquid',
+                  'arcee': 'Arcee',
+                  'chutes': 'Chutes',
+                  'huggingface': 'Hugging Face',
+                  'ollama': 'Ollama',
+                  'openrouter': 'OpenRouter',
+                  'databricks': 'Databricks',
+                  'snowflake': 'Snowflake',
+                  'nscale': 'NScale',
+                  'featherless_ai': 'Featherless AI',
+                  'cloudflare': 'Cloudflare',
+                  'voyage': 'Voyage AI',
+                  'assemblyai': 'AssemblyAI',
+                  'jina_ai': 'Jina AI',
+                  'sagemaker': 'AWS SageMaker',
+                  'azure': 'Azure',
+                  'text-completion-openai': 'OpenAI',
+                  'text-completion-codestral': 'Codestral',
+                  'cohere_chat': 'Cohere Chat',
+                  'vertex_ai-anthropic_models': 'Vertex AI-Anthropic Models',
+                  'vertex_ai-ai21_models': 'Vertex AI-AI21 Models',
+                  'vertex_ai-mistral_models': 'Vertex AI-Mistral Models',
+                  'vertex_ai-chat-models': 'Vertex AI-Chat-Models',
+                  'vertex_ai-code-chat-models': 'Vertex AI-Code-Chat-Models',
+                  'vertex_ai-code-text-models': 'Vertex AI-Code-Text-Models',
+                  'vertex_ai-text-models': 'Vertex AI-Text-Models',
+                  'watsonx': 'Watsonx',
+                  'nlp_cloud': 'Nlp Cloud',
+                  'aleph_alpha': 'Aleph Alpha',
+                  'palm': 'Palm',
+                  'azure_ai': 'Azure Ai',
+                  'azure_text': 'Azure Text',
+                  'fireworks_ai-embedding-models': 'Fireworks Ai-Embedding-Models',
+              }
+              
+              if litellm_provider in provider_map:
+                  return provider_map[litellm_provider]
+              
+              # Model name pattern matching
+              if model_name.startswith(('gpt-', 'o1', 'o3', 'o4')):
+                  return 'OpenAI'
+              elif model_name.startswith('claude'):
+                  return 'Anthropic'
+              elif model_name.startswith(('gemini', 'models/')):
+                  return 'Google'
+              elif 'deepseek' in model_name.lower():
+                  return 'DeepSeek'
+              elif any(x in model_name.lower() for x in ['mistral', 'mixtral']):
+                  return 'Mistral'
+              elif 'llama' in model_name.lower():
+                  return 'Meta'
+              elif 'qwen' in model_name.lower():
+                  return 'Alibaba'
+              elif 'grok' in model_name.lower():
+                  return 'xAI'
+              
+              # Fallback
+              return litellm_provider.replace('_', ' ').title() if litellm_provider else 'Other'
+          
+          def extract_capabilities(model_data: Dict[str, Any]) -> List[str]:
+              """Extract model capabilities from the new format"""
+              capabilities = []
+              
+              # Map support fields to standardized capability names
+              capability_mapping = {
+                  'supports_function_calling': 'Function Calling',
+                  'supports_parallel_function_calling': 'Parallel Function Calling', 
+                  'supports_vision': 'Vision',
+                  'supports_audio_input': 'Audio Input',
+                  'supports_audio_output': 'Audio Output',
+                  'supports_prompt_caching': 'Prompt Caching',
+                  'supports_response_schema': 'Response Schema',
+                  'supports_system_messages': 'System Messages',
+                  'supports_reasoning': 'Reasoning',
+                  'supports_web_search': 'Web Search',
+                  'supports_pdf_input': 'Pdf Input',
+                  'supports_tool_choice': 'Tool Choice',
+                  'supports_native_streaming': 'Native Streaming'
+              }
+              
+              for field, capability_name in capability_mapping.items():
+                  if model_data.get(field):
+                      capabilities.append(capability_name)
+              
+              return capabilities
+          
+          def extract_pricing_tiers(model_data: Dict[str, Any]) -> Dict[str, Any]:
+              """Extract different pricing tiers (standard, batch, cache)"""
+              pricing = {}
+              
+              # Standard pricing (required)
+              input_cost = model_data.get('input_cost_per_token')
+              output_cost = model_data.get('output_cost_per_token')
+              
+              if input_cost is not None and output_cost is not None:
+                  pricing['standard'] = {
+                      'inputPrice': round(float(input_cost) * 1_000_000, 6),
+                      'outputPrice': round(float(output_cost) * 1_000_000, 6)
+                  }
+              
+              # Batch pricing (often 50% cheaper)
+              batch_input = model_data.get('input_cost_per_token_batches')
+              batch_output = model_data.get('output_cost_per_token_batches')
+              
+              if batch_input is not None and batch_output is not None:
+                  pricing['batch'] = {
+                      'inputPrice': round(float(batch_input) * 1_000_000, 6),
+                      'outputPrice': round(float(batch_output) * 1_000_000, 6)
+                  }
+              
+              # Cache pricing (significant savings for repeated content)
+              cache_read = model_data.get('cache_read_input_token_cost')
+              cache_creation = model_data.get('cache_creation_input_token_cost')
+              cache_audio = model_data.get('cache_creation_input_audio_token_cost')
+              
+              if any([cache_read, cache_creation, cache_audio]):
+                  cache_pricing = {}
+                  if cache_read is not None:
+                      cache_pricing['readPrice'] = round(float(cache_read) * 1_000_000, 6)
+                  if cache_creation is not None:
+                      cache_pricing['creationPrice'] = round(float(cache_creation) * 1_000_000, 6)
+                  if cache_audio is not None:
+                      cache_pricing['audioCreationPrice'] = round(float(cache_audio) * 1_000_000, 6)
+                  
+                  if cache_pricing:
+                      pricing['cache'] = cache_pricing
+              
+              # Reasoning tokens (O1/R1 models)
+              reasoning_cost = model_data.get('output_cost_per_reasoning_token')
+              if reasoning_cost is not None:
+                  pricing['reasoning'] = {
+                      'outputPrice': round(float(reasoning_cost) * 1_000_000, 6)
+                  }
+              
+              # Search context pricing (new format)
+              search_pricing = model_data.get('search_context_cost_per_query')
+              if search_pricing and isinstance(search_pricing, dict):
+                  pricing['search'] = {}
+                  for size, cost in search_pricing.items():
+                      if cost is not None:
+                          pricing['search'][size] = round(float(cost), 6)
+              
+              return pricing
+          
+          def main():
+              print("Converting LiteLLM pricing data...")
+              
+              # Read from stdin (piped input from curl)
+              try:
+                  import sys
+                  content = sys.stdin.read()
+                  if not content.strip():
+                      print("Error: No data to process")
+                      return
+                      
+              except Exception as e:
+                  print(f"Error reading input: {e}")
+                  return
+              
+              print("Cleaning JSON comments...")
+              cleaned_content = remove_json_comments(content)
+              
+              try:
+                  data = json.loads(cleaned_content)
+                  print(f"Successfully parsed JSON with {len(data)} entries")
+              except json.JSONDecodeError as e:
+                  print(f"JSON parsing failed: {e}")
+                  return
+              
+              # Process the data
+              providers = defaultdict(list)
+              processed = 0
+              skipped = 0
+              
+              # Statistics
+              capabilities_count = defaultdict(int)
+              pricing_tiers_count = defaultdict(int)
+              deprecated_count = 0
+              modalities_count = defaultdict(int)
+              
+              for model_name, model_data in data.items():
+                  # Skip sample spec and invalid entries
+                  if model_name == 'sample_spec' or not isinstance(model_data, dict):
+                      continue
+                  
+                  # Get basic info
+                  litellm_provider = model_data.get('litellm_provider', '')
+                  mode = model_data.get('mode', 'chat')
+                  
+                  # Skip if not a chat/completion model
+                  if mode not in ['chat', 'completion']:
+                      skipped += 1
+                      continue
+                  
+                  # Extract pricing tiers
+                  pricing_data = extract_pricing_tiers(model_data)
+                  
+                  # Skip if no standard pricing
+                  if 'standard' not in pricing_data:
+                      skipped += 1
+                      continue
+                  
+                  # Get provider name
+                  provider_name = get_provider_name(model_name, litellm_provider)
+                  
+                  # Extract capabilities
+                  capabilities = extract_capabilities(model_data)
+                  
+                  # Create enhanced model entry
+                  model_entry = {
+                      "name": model_name,
+                      "pricing": pricing_data
+                  }
+                  
+                  # Add basic pricing for backwards compatibility
+                  model_entry["inputPrice"] = pricing_data['standard']['inputPrice']
+                  model_entry["outputPrice"] = pricing_data['standard']['outputPrice']
+                  
+                  # Add reasoning token cost if available (backwards compatibility)
+                  if 'reasoning' in pricing_data:
+                      model_entry["reasoningPrice"] = pricing_data['reasoning']['outputPrice']
+                  
+                  # Add context limits (handle both new and legacy formats)
+                  max_input = model_data.get('max_input_tokens') or model_data.get('max_tokens')
+                  max_output = model_data.get('max_output_tokens') or model_data.get('max_tokens')
+                  
+                  if max_input:
+                      model_entry["maxInputTokens"] = max_input
+                  if max_output:
+                      model_entry["maxOutputTokens"] = max_output
+                  
+                  # Add capabilities
+                  if capabilities:
+                      model_entry["capabilities"] = capabilities
+                      for cap in capabilities:
+                          capabilities_count[cap] += 1
+                  
+                  # Add operational info
+                  operational = {}
+                  
+                  # Deprecation date
+                  if model_data.get('deprecation_date'):
+                      operational['deprecationDate'] = model_data['deprecation_date']
+                      deprecated_count += 1
+                  
+                  # Supported endpoints (new format)
+                  if model_data.get('supported_endpoints'):
+                      operational['supportedEndpoints'] = model_data['supported_endpoints']
+                  
+                  # Supported modalities (new format)
+                  if model_data.get('supported_modalities'):
+                      operational['supportedModalities'] = model_data['supported_modalities']
+                      for modality in model_data['supported_modalities']:
+                          modalities_count[modality] += 1
+                  
+                  # Supported output modalities (new format)
+                  if model_data.get('supported_output_modalities'):
+                      operational['supportedOutputModalities'] = model_data['supported_output_modalities']
+                  
+                  # Mode
+                  operational['mode'] = mode
+                  
+                  # Provider info
+                  operational['litellmProvider'] = litellm_provider
+                  
+                  if operational:
+                      model_entry["operational"] = operational
+                  
+                  # Count pricing tiers
+                  for tier in pricing_data:
+                      pricing_tiers_count[tier] += 1
+                  
+                  providers[provider_name].append(model_entry)
+                  processed += 1
+              
+              # Convert to list format
+              provider_list = []
+              for provider_name, models in providers.items():
+                  provider_list.append({
+                      "provider": provider_name,
+                      "models": sorted(models, key=lambda x: x['name'])
+                  })
+              
+              # Sort by provider name
+              provider_list.sort(key=lambda x: x['provider'])
+              
+              # Add metadata
+              metadata = {
+                  "generated": datetime.now().isoformat(),
+                  "source": "LiteLLM model_prices_and_context_window.json",
+                  "stats": {
+                      "totalModels": processed,
+                      "totalProviders": len(provider_list),
+                      "deprecatedModels": deprecated_count,
+                      "capabilitiesBreakdown": dict(capabilities_count),
+                      "pricingTiersBreakdown": dict(pricing_tiers_count),
+                      "modalitiesBreakdown": dict(modalities_count)
+                  }
+              }
+              
+              output_data = {
+                  "metadata": metadata,
+                  "providers": provider_list
+              }
+              
+              # Write output
+              try:
+                  with open('llm_pricing_data.json', 'w', encoding='utf-8') as f:
+                      json.dump(output_data, f, indent=2, ensure_ascii=False)
+                  
+                  print(f"\nConversion successful!")
+                  print(f"- Processed: {processed} models")
+                  print(f"- Skipped: {skipped} models")
+                  print(f"- Providers: {len(provider_list)}")
+                  print(f"- Deprecated models: {deprecated_count}")
+                  print(f"- Output: llm_pricing_data.json")
+                  
+                  # Show provider summary
+                  print(f"\nProvider breakdown:")
+                  for provider in provider_list[:10]:
+                      print(f"- {provider['provider']}: {len(provider['models'])} models")
+                  if len(provider_list) > 10:
+                      print(f"... and {len(provider_list) - 10} more providers")
+                  
+                  # Show top capabilities
+                  print(f"\nTop capabilities:")
+                  sorted_caps = sorted(capabilities_count.items(), key=lambda x: x[1], reverse=True)
+                  for cap, count in sorted_caps[:10]:
+                      print(f"- {cap}: {count} models")
+                  
+                  # Show pricing tiers
+                  print(f"\nPricing tiers available:")
+                  for tier, count in pricing_tiers_count.items():
+                      print(f"- {tier}: {count} models")
+                  
+                  # Show modalities
+                  if modalities_count:
+                      print(f"\nSupported modalities:")
+                      for modality, count in modalities_count.items():
+                          print(f"- {modality}: {count} models")
+                  
+                  # Show some examples
+                  print(f"\nExample enhanced entries:")
+                  for provider in provider_list[:2]:
+                      if provider['models']:
+                          model = provider['models'][0]
+                          pricing = model.get('pricing', {}).get('standard', {})
+                          caps = len(model.get('capabilities', []))
+                          tiers = len(model.get('pricing', {}))
+                          modalities = model.get('operational', {}).get('supportedModalities', [])
+                          print(f"- {provider['provider']}/{model['name']}: ${pricing.get('inputPrice', 0):.3f}/${pricing.get('outputPrice', 0):.3f} per 1M tokens, {caps} capabilities, {tiers} pricing tiers, modalities: {modalities}")
+                          
+              except Exception as e:
+                  print(f"Error writing output: {e}")
+          
+          if __name__ == "__main__":
+              main() 
+          EOF
+          echo "Created enhanced convert_litellm_robust.py"
+
+      # 6. Configure Git in the workflow runner (only if changes detected)
+      - name: Configure Git
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+
+      # 7. Commit the tracking file (only if changes detected)
+      - name: Commit tracking file
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          git add last_litellm_commit.txt
+          git commit -m "Update LiteLLM tracking to commit ${{ steps.check_changes.outputs.litellm_commit }}" || echo "No changes to commit"
+          git push
+
+      # 8. Upload the generated JSON as a workflow artifact (only if changes detected)
+      - name: Upload Workflow Artifact
+        if: steps.check_changes.outputs.has_changes == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: LiteLLM Pricing Data # Name of the artifact bundle
+          path: llm_pricing_data.json # Path in the root
+
+      # 9. Upload the generated JSON as a release asset (only on release trigger)
+      - name: Upload Release Asset
+        if: github.event_name == 'release' && steps.check_changes.outputs.has_changes == 'true'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }} # URL for uploading assets to this release
+          asset_path: ./llm_pricing_data.json             # Path in the root
+          asset_name: llm_pricing_data.json             # Name of the asset in the release
+          asset_content_type: application/json          # MIME type
+
+      # 10. Add pricing data to latest existing release (for scheduled runs and manual triggers)
+      - name: Get Latest Release Info
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && steps.check_changes.outputs.has_changes == 'true'
+        id: get_release
+        run: |
+          # Get the latest release info
+          LATEST_RELEASE=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/latest")
+          
+          RELEASE_ID=$(echo "$LATEST_RELEASE" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('id', ''))")
+          RELEASE_TAG=$(echo "$LATEST_RELEASE" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('tag_name', ''))")
+          RELEASE_NAME=$(echo "$LATEST_RELEASE" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('name', ''))")
+          UPLOAD_URL=$(echo "$LATEST_RELEASE" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('upload_url', '').replace('{?name,label}', ''))")
+          
+          if [ -z "$RELEASE_ID" ] || [ "$RELEASE_ID" = "null" ]; then
+            echo "No existing releases found. Skipping pricing data upload."
+            echo "has_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "Found latest release: $RELEASE_NAME ($RELEASE_TAG)"
+            echo "Release ID: $RELEASE_ID"
+            echo "Upload URL: $UPLOAD_URL"
+            echo "has_release=true" >> $GITHUB_OUTPUT
+            echo "release_id=$RELEASE_ID" >> $GITHUB_OUTPUT
+            echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+            echo "release_name=$RELEASE_NAME" >> $GITHUB_OUTPUT
+            echo "upload_url=$UPLOAD_URL" >> $GITHUB_OUTPUT
+          fi
+
+      # 11. Check if pricing data file already exists in the release
+      - name: Check Existing Asset
+        if: steps.get_release.outputs.has_release == 'true'
+        id: check_asset
+        run: |
+          # Check if llm_pricing_data.json already exists in the release
+          EXISTING_ASSET=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/${{ steps.get_release.outputs.release_id }}/assets" | \
+            python3 -c "import sys, json; data = json.load(sys.stdin); assets = [a for a in data if a.get('name') == 'llm_pricing_data.json']; print(assets[0].get('id', '') if assets else '')")
+          
+          if [ -n "$EXISTING_ASSET" ] && [ "$EXISTING_ASSET" != "null" ]; then
+            echo "Found existing pricing data asset: $EXISTING_ASSET"
+            echo "existing_asset_id=$EXISTING_ASSET" >> $GITHUB_OUTPUT
+            echo "needs_deletion=true" >> $GITHUB_OUTPUT
+          else
+            echo "No existing pricing data asset found"
+            echo "needs_deletion=false" >> $GITHUB_OUTPUT
+          fi
+
+      # 12. Delete existing pricing data file if it exists
+      - name: Delete Existing Asset
+        if: steps.check_asset.outputs.needs_deletion == 'true'
+        run: |
+          echo "Deleting existing pricing data file..."
+          curl -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/assets/${{ steps.check_asset.outputs.existing_asset_id }}"
+          echo "Existing asset deleted successfully"
+
+      # 13. Upload new pricing data to the latest release
+      - name: Upload Pricing Data to Latest Release
+        if: steps.get_release.outputs.has_release == 'true'
+        run: |
+          echo "Uploading pricing data to release: ${{ steps.get_release.outputs.release_name }}"
+          
+          # Upload the new pricing data file
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            --data-binary @llm_pricing_data.json \
+            "${{ steps.get_release.outputs.upload_url }}?name=llm_pricing_data.json&label=LLM%20Pricing%20Data"
+          
+          echo "✅ Successfully uploaded pricing data to release ${{ steps.get_release.outputs.release_tag }}"
+          echo "📊 Updated: $(date +'%Y-%m-%d %H:%M UTC')"
+          echo "🔄 Source: LiteLLM commit ${{ steps.check_changes.outputs.litellm_commit }}"
+
+      # 11. Report no changes (when no updates needed)
+      - name: Report no changes
+        if: steps.check_changes.outputs.has_changes == 'false'
+        run: |
+          echo "✅ No changes detected in LiteLLM pricing data since last run"
+          echo "📅 Last processed commit: ${{ steps.check_changes.outputs.litellm_commit }}"
+          echo "⏭️ Skipping unnecessary processing and release creation"
