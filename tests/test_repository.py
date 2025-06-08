@@ -5,7 +5,7 @@ import tempfile
 import shutil
 from pathlib import Path
 from git import Repo
-from codebase_token_counter.token_counter import process_repository
+from codebase_token_counter.token_counter import process_repository, TokenCounterConfig
 
 def create_test_repo():
     """Create a test repository with sample files."""
@@ -37,13 +37,21 @@ def create_test_repo():
 def test_process_repository():
     """Test repository processing functionality."""
     for repo_path in create_test_repo():
+        # Create config
+        config = TokenCounterConfig()
+        
         # Process the repository
-        total_tokens, extension_stats, file_counts = process_repository(repo_path)
+        total_tokens, extension_stats, file_counts, directory_stats, all_files, all_directories = process_repository(
+            repo_path, config, total_only=False, debug=False, show_files=False
+        )
         
         # Verify results
         assert isinstance(total_tokens, int)
         assert isinstance(extension_stats, dict)
         assert isinstance(file_counts, dict)
+        assert isinstance(directory_stats, dict)
+        assert isinstance(all_files, list)
+        assert isinstance(all_directories, set)
         assert total_tokens > 0
         
         # Check if we found all file types
@@ -59,3 +67,39 @@ def test_process_repository():
         # Check if token counts are reasonable
         for ext, count in extension_stats.items():
             assert count > 0  # Each file should have at least one token
+        
+        # Check directory stats
+        assert 'root' in all_directories
+        assert 'src' in all_directories
+        assert 'tests' in all_directories
+        assert 'static' in all_directories
+        
+        # Check all_files structure
+        assert len(all_files) == 5  # Should have 5 files total
+        for file_path, extension in all_files:
+            assert os.path.exists(file_path)
+            assert extension in ['.py', '.md', '.css']
+
+def test_process_repository_with_exclusions():
+    """Test repository processing with exclusions."""
+    for repo_path in create_test_repo():
+        # Create config with exclusions
+        config = TokenCounterConfig()
+        config.add_exclude_dirs(['tests'])
+        config.add_exclude_extensions(['.css'])
+        
+        # Process the repository
+        total_tokens, extension_stats, file_counts, directory_stats, all_files, all_directories = process_repository(
+            repo_path, config, total_only=False, debug=False, show_files=False
+        )
+        
+        # Verify exclusions worked
+        assert '.css' not in extension_stats  # CSS files should be excluded
+        assert file_counts.get('.css', 0) == 0  # No CSS files counted
+        
+        # Should still have Python and Markdown files
+        assert '.py' in extension_stats
+        assert '.md' in extension_stats
+        
+        # Should have fewer files due to exclusions
+        assert len(all_files) < 5
