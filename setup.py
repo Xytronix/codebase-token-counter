@@ -7,13 +7,13 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
     requirements = [line.strip() for line in fh if line.strip() and not line.startswith("#")]
 
 setup(
-    name="codebase-token-counter",
+    name="code-token-counter",
     version="0.1.2",
     author="Liatrio",
     description="A tool to count tokens in your codebase",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/liatrio/codebase-token-counter",
+    url="https://github.com/Xytronix/codebase-token-counter",
     packages=find_packages(),
     classifiers=[
         "Development Status :: 3 - Alpha",
