@@ -65,24 +65,7 @@ jobs:
           
           echo "litellm_commit=$LITELLM_COMMIT" >> $GITHUB_OUTPUT
 
-      # 4. Download and convert LiteLLM pricing data (only if changes detected)
-      - name: Download and convert LiteLLM pricing data
-        if: steps.check_changes.outputs.has_changes == 'true'
-        run: |
-          PRICING_URL="https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
-          echo "Downloading LiteLLM pricing data..."
-          curl -s -L "$PRICING_URL" | python3 convert_litellm_robust.py
-          
-          if [ -f "llm_pricing_data.json" ]; then
-            echo "Conversion successful!"
-            echo "Output file size: $(wc -c < llm_pricing_data.json) bytes"
-            echo "Number of providers: $(cat llm_pricing_data.json | python3 -c "import sys, json; data = json.load(sys.stdin); print(len(data.get('providers', [])))")"
-          else
-            echo "::error::Conversion failed - output file not created!"
-            exit 1
-          fi
-
-      # 5. Create the enhanced Python converter script
+      # 4. Create the enhanced Python converter script
       - name: Create Enhanced Python Converter
         run: |
           cat > convert_litellm_robust.py << 'EOF'
@@ -524,6 +507,23 @@ jobs:
               main() 
           EOF
           echo "Created enhanced convert_litellm_robust.py"
+
+      # 5. Download and convert LiteLLM pricing data (only if changes detected)
+      - name: Download and convert LiteLLM pricing data
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          PRICING_URL="https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
+          echo "Downloading LiteLLM pricing data..."
+          curl -s -L "$PRICING_URL" | python3 convert_litellm_robust.py
+          
+          if [ -f "llm_pricing_data.json" ]; then
+            echo "Conversion successful!"
+            echo "Output file size: $(wc -c < llm_pricing_data.json) bytes"
+            echo "Number of providers: $(cat llm_pricing_data.json | python3 -c "import sys, json; data = json.load(sys.stdin); print(len(data.get('providers', [])))")"
+          else
+            echo "::error::Conversion failed - output file not created!"
+            exit 1
+          fi
 
       # 6. Configure Git in the workflow runner (only if changes detected)
       - name: Configure Git
