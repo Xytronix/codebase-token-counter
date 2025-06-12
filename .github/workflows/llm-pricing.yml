@@ -557,7 +557,7 @@ jobs:
           git checkout ${{ github.head_ref || github.ref_name || 'main' }}
           
           # Add and commit changes
-          git add last_litellm_cache.txt
+          git add last_litellm_commit.txt
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
