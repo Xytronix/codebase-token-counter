@@ -74,6 +74,8 @@ jobs:
           fi
           
           echo "litellm_commit=$LITELLM_COMMIT" >> $GITHUB_OUTPUT
+          # Expose previously processed commit so later steps can build a changelog section
+          echo "last_processed_commit=$LAST_COMMIT" >> $GITHUB_OUTPUT
 
       # Add this step after successful conversion (replace steps 6-7):
       - name: Save Last Commit Cache
@@ -659,6 +661,77 @@ jobs:
           echo "✅ Successfully uploaded pricing data to release ${{ steps.get_release.outputs.release_tag }}"
           echo "📊 Updated: $(date +'%Y-%m-%d %H:%M UTC')"
           echo "🔄 Source: LiteLLM commit ${{ steps.check_changes.outputs.litellm_commit }}"
+
+      # 14. Append pricing-file commit changelog to the release body
+      - name: Append pricing changelog to release notes
+        if: steps.check_changes.outputs.has_changes == 'true' && steps.get_release.outputs.has_release == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LAST_SHA="${{ steps.check_changes.outputs.last_processed_commit }}"
+          NEW_SHA="${{ steps.check_changes.outputs.litellm_commit }}"
+
+          # Skip if this is the very first run (no previous SHA)
+          if [ -z "$LAST_SHA" ] || [ "$LAST_SHA" = "none" ]; then
+            echo "No previous commit recorded – skipping changelog append"
+            exit 0
+          fi
+
+          echo "Building changelog from $LAST_SHA to $NEW_SHA …"
+
+          # Fetch current release body
+          RELEASE_JSON=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/${{ steps.get_release.outputs.release_id }}")
+          OLD_BODY=$(echo "$RELEASE_JSON" | jq -r '.body')
+
+          # Collect already-listed short SHAs (8 chars) to avoid duplicates
+          EXISTING_SHAS=$(echo "$OLD_BODY" | grep -oE '[0-9a-f]{8}' | sort -u | tr '\n' ' ')
+
+          # Query commits in the range
+          RANGE_JSON=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/compare/$LAST_SHA...$NEW_SHA")
+
+          API="https://api.github.com/repos/${{ github.repository }}"
+
+          CHANGELOG=""
+          for SHA in $(echo "$RANGE_JSON" | jq -r '.commits[].sha'); do
+            SHORT=${SHA:0:8}
+            if echo " $EXISTING_SHAS " | grep -q " $SHORT "; then
+              # Already documented
+              continue
+            fi
+
+            # Check if this specific commit touches the pricing file
+            HIT=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "$API/commits/$SHA" | \
+              jq -r '.files[].filename' | grep -c 'model_prices_and_context_window.json' || true)
+            if [ "$HIT" -eq 0 ]; then
+              continue
+            fi
+
+            DATE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "$API/commits/$SHA" | jq -r '.commit.committer.date' | cut -dT -f1)
+            TITLE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "$API/commits/$SHA" | jq -r '.commit.message' | head -n1)
+            COMMIT_URL="https://github.com/${{ github.repository }}/commit/${SHA}"
+            CHANGELOG+="• ${DATE} · [${SHORT}](${COMMIT_URL}) · ${TITLE}\n"
+          done
+
+          if [ -z "$CHANGELOG" ]; then
+            echo "No new entries to add"
+            exit 0
+          fi
+
+          NEW_SECTION="### 🔄 Pricing file updates (${LAST_SHA}…${NEW_SHA})\n${CHANGELOG}"
+          # Append; keep old content intact
+          NEW_BODY="${OLD_BODY}\n\n${NEW_SECTION}"
+
+          # Patch the release body
+          jq -n --arg body "$NEW_BODY" '{body:$body}' > payload.json
+          curl -s -X PATCH \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d @payload.json \
+            "https://api.github.com/repos/${{ github.repository }}/releases/${{ steps.get_release.outputs.release_id }}"
+
+          echo "Changelog appended to release notes"
 
       # 11. Report no changes (when no updates needed)
       - name: Report no changes
