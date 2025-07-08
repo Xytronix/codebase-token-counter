@@ -83,7 +83,8 @@ jobs:
         uses: actions/cache/save@v3
         with:
           path: last_commit_cache.txt
-          key: litellm-commit-tracking-${{ github.repository }}-${{ steps.check_changes.outputs.litellm_commit }}
+          key: litellm-commit-tracking-${{ github.repository }}
+        continue-on-error: true
 
       # 4. Create the enhanced Python converter script
       - name: Create Enhanced Python Converter
