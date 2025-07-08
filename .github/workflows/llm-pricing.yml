@@ -311,6 +311,41 @@ jobs:
                       if cost is not None:
                           pricing['search'][size] = round(float(cost), 6)
 
+              service_pricing = {}
+              
+              # File search pricing (convert 1k to 1M basis)
+              file_search_1k = model_data.get('file_search_cost_per_1k_calls')
+              if file_search_1k is not None:
+                  service_pricing['fileSearchPer1MCalls'] = round(float(file_search_1k) * 1000, 6)
+              
+              file_search_gb = model_data.get('file_search_cost_per_gb_per_day')
+              if file_search_gb is not None:
+                  service_pricing['fileSearchPerGbPerDay'] = round(float(file_search_gb), 6)
+              
+              # Vector store pricing
+              vector_store = model_data.get('vector_store_cost_per_gb_per_day')
+              if vector_store is not None:
+                  service_pricing['vectorStorePerGbPerDay'] = round(float(vector_store), 6)
+              
+              # Computer use pricing (convert 1k tokens to 1M tokens basis)
+              computer_input = model_data.get('computer_use_input_cost_per_1k_tokens')
+              computer_output = model_data.get('computer_use_output_cost_per_1k_tokens')
+              if computer_input is not None or computer_output is not None:
+                  computer_pricing = {}
+                  if computer_input is not None:
+                      computer_pricing['inputPer1MTokens'] = round(float(computer_input) * 1000, 6)
+                  if computer_output is not None:
+                      computer_pricing['outputPer1MTokens'] = round(float(computer_output) * 1000, 6)
+                  service_pricing['computerUse'] = computer_pricing
+              
+              # Code interpreter pricing (per session - no conversion needed)
+              code_interpreter = model_data.get('code_interpreter_cost_per_session')
+              if code_interpreter is not None:
+                  service_pricing['codeInterpreterPerSession'] = round(float(code_interpreter), 6)
+              
+              if service_pricing:
+                  pricing['services'] = service_pricing
+
               return pricing
 
           def main():
@@ -427,6 +462,10 @@ jobs:
                   # Supported output modalities (new format)
                   if model_data.get('supported_output_modalities'):
                       operational['supportedOutputModalities'] = model_data['supported_output_modalities']
+
+                  # Supported regions (new format)
+                  if model_data.get('supported_regions'):
+                      operational['supportedRegions'] = model_data['supported_regions']
 
                   # Mode
                   operational['mode'] = mode
