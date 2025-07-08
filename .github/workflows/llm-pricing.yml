@@ -43,6 +43,22 @@ jobs:
         with:
           path: last_commit_cache.txt
           key: litellm-commit-tracking-${{ github.repository }}
+          restore-keys: |
+            litellm-commit-tracking-${{ github.repository }}-
+        continue-on-error: true
+
+      # 3a. Fallback: try to get tracking file from repository if cache fails
+      - name: Fallback tracking file retrieval
+        if: steps.cache_commit.outputs.cache-hit != 'true'
+        run: |
+          # Try to get the file from the repository (if it was committed previously)
+          if git show HEAD:last_commit_cache.txt > last_commit_cache.txt 2>/dev/null; then
+            echo "✅ Retrieved tracking file from repository"
+            echo "cache_fallback=true" >> $GITHUB_OUTPUT
+          else
+            echo "ℹ️ No tracking file found in repository - will perform full check"
+            echo "cache_fallback=false" >> $GITHUB_OUTPUT
+          fi
 
       # 3b. Check for changes in LiteLLM pricing data
       - name: Check for LiteLLM changes
@@ -64,13 +80,18 @@ jobs:
           ")
           echo "Latest LiteLLM commit: $LITELLM_COMMIT"
           
-          # Check if we have a previous commit hash from cache
+          # Check if we have a previous commit hash from cache or fallback
           if [ -f "last_commit_cache.txt" ]; then
             LAST_COMMIT=$(cat last_commit_cache.txt)
             echo "Last processed commit: $LAST_COMMIT"
           else
-            LAST_COMMIT="none"
-            echo "No previous commit found - first run"
+            # Fallback: try to get the last commit from git history if available
+            LAST_COMMIT=$(git log --oneline --grep="Update LiteLLM tracking" --max-count=1 --pretty=format:"%s" 2>/dev/null | grep -o '[a-f0-9]\{8\}' | head -1 || echo "none")
+            if [ "$LAST_COMMIT" != "none" ]; then
+              echo "Last processed commit (from git history): $LAST_COMMIT"
+            else
+              echo "No previous commit found - first run"
+            fi
           fi
           
           # Compare commits
@@ -93,7 +114,7 @@ jobs:
         uses: actions/cache/save@v3
         with:
           path: last_commit_cache.txt
-          key: litellm-commit-tracking-${{ github.repository }}
+          key: litellm-commit-tracking-${{ github.repository }}-${{ steps.check_changes.outputs.litellm_commit }}-${{ github.run_id }}
         continue-on-error: true
 
       # 4. Create the enhanced Python converter script
@@ -609,14 +630,14 @@ jobs:
           # Ensure we're on the correct branch
           git checkout ${{ github.head_ref || github.ref_name || 'main' }}
 
-          # Add and commit changes
+          # Add and commit changes (serves as backup when cache fails)
           git add last_commit_cache.txt
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
             git commit -m "Update LiteLLM tracking to commit ${{ steps.check_changes.outputs.litellm_commit }}"
             git push origin ${{ github.head_ref || github.ref_name || 'main' }}
-            echo "Changes committed and pushed successfully"
+            echo "✅ Changes committed and pushed successfully (serves as cache backup)"
           fi
 
       # 8. Upload the generated JSON as a workflow artifact (only if changes detected)
