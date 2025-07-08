@@ -688,11 +688,11 @@ jobs:
           # Collect already-listed short SHAs (8 chars) to avoid duplicates
           EXISTING_SHAS=$(echo "$OLD_BODY" | grep -oE '[0-9a-f]{8}' | sort -u | tr '\n' ' ')
 
-          # Query commits in the range
+          # Query commits in the LiteLLM repository range (not local repo)
           RANGE_JSON=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-            "https://api.github.com/repos/${{ github.repository }}/compare/$LAST_SHA...$NEW_SHA")
+            "https://api.github.com/repos/BerriAI/litellm/compare/$LAST_SHA...$NEW_SHA")
 
-          API="https://api.github.com/repos/${{ github.repository }}"
+          LITELLM_API="https://api.github.com/repos/BerriAI/litellm"
 
           CHANGELOG=""
           for SHA in $(echo "$RANGE_JSON" | jq -r '.commits[].sha'); do
@@ -702,16 +702,16 @@ jobs:
               continue
             fi
 
-            # Check if this specific commit touches the pricing file
-            HIT=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "$API/commits/$SHA" | \
+            # Check if this specific commit touches the pricing file in LiteLLM repo
+            HIT=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "$LITELLM_API/commits/$SHA" | \
               jq -r '.files[].filename' | grep -c 'model_prices_and_context_window.json' || true)
             if [ "$HIT" -eq 0 ]; then
               continue
             fi
 
-            DATE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "$API/commits/$SHA" | jq -r '.commit.committer.date' | cut -dT -f1)
-            TITLE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "$API/commits/$SHA" | jq -r '.commit.message' | head -n1)
-            COMMIT_URL="https://github.com/${{ github.repository }}/commit/${SHA}"
+            DATE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "$LITELLM_API/commits/$SHA" | jq -r '.commit.committer.date' | cut -dT -f1)
+            TITLE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "$LITELLM_API/commits/$SHA" | jq -r '.commit.message' | head -n1)
+            COMMIT_URL="https://github.com/BerriAI/litellm/commit/${SHA}"
             CHANGELOG+="• ${DATE} · [${SHORT}](${COMMIT_URL}) · ${TITLE}\n"
           done
 
@@ -720,7 +720,7 @@ jobs:
             exit 0
           fi
 
-          NEW_SECTION="### 🔄 Pricing file updates (${LAST_SHA}…${NEW_SHA})\n${CHANGELOG}"
+          NEW_SECTION="### 🔄 LiteLLM Pricing Updates (${LAST_SHA}…${NEW_SHA})\n${CHANGELOG}"
           # Append; keep old content intact
           NEW_BODY="${OLD_BODY}\n\n${NEW_SECTION}"
 
