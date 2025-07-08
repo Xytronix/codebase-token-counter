@@ -720,7 +720,7 @@ jobs:
             exit 0
           fi
 
-          NEW_SECTION="### 🔄 LiteLLM Pricing Updates (${LAST_SHA}…${NEW_SHA})\n${CHANGELOG}"
+          NEW_SECTION="### 🔄 Pricing Updates (${LAST_SHA}…${NEW_SHA})\n${CHANGELOG}"
           # Append; keep old content intact
           NEW_BODY="${OLD_BODY}\n\n${NEW_SECTION}"
 
