@@ -50,8 +50,18 @@ jobs:
         run: |
           PRICING_URL="https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
           
-          # Get latest commit hash of the LiteLLM pricing file
-          LITELLM_COMMIT=$(curl -s "https://api.github.com/repos/BerriAI/litellm/commits?path=model_prices_and_context_window.json&per_page=1" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data[0]['sha'][:8]) if data else 'unknown'")
+          # Get latest commit hash of the LiteLLM pricing file with better error handling
+          LITELLM_COMMIT=$(curl -s "https://api.github.com/repos/BerriAI/litellm/commits?path=model_prices_and_context_window.json&per_page=1" | python3 -c "
+          import sys, json
+          try:
+              data = json.load(sys.stdin)
+              if data and len(data) > 0 and 'sha' in data[0]:
+                  print(data[0]['sha'][:8])
+              else:
+                  print('unknown')
+          except (json.JSONDecodeError, KeyError, IndexError, TypeError):
+              print('unknown')
+          ")
           echo "Latest LiteLLM commit: $LITELLM_COMMIT"
           
           # Check if we have a previous commit hash from cache
@@ -756,7 +766,7 @@ jobs:
 
           if [ -z "$CHANGELOG" ]; then
             echo "No new entries to add"
-            exit 0s
+            exit 0
           fi
 
           NEW_SECTION="### 🔄 Pricing Updates (${LAST_SHA}…${NEW_SHA})\n${CHANGELOG}"
