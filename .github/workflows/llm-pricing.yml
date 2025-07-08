@@ -313,10 +313,10 @@ jobs:
 
               service_pricing = {}
               
-              # File search pricing (convert 1k to 1M basis)
+              # File search pricing
               file_search_1k = model_data.get('file_search_cost_per_1k_calls')
               if file_search_1k is not None:
-                  service_pricing['fileSearchPer1MCalls'] = round(float(file_search_1k) * 1000, 6)
+                  service_pricing['fileSearchPer1KCalls'] = round(float(file_search_1k), 6)
               
               file_search_gb = model_data.get('file_search_cost_per_gb_per_day')
               if file_search_gb is not None:
@@ -756,7 +756,7 @@ jobs:
 
           if [ -z "$CHANGELOG" ]; then
             echo "No new entries to add"
-            exit 0
+            exit 0s
           fi
 
           NEW_SECTION="### 🔄 Pricing Updates (${LAST_SHA}…${NEW_SHA})\n${CHANGELOG}"
