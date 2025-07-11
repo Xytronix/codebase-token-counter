@@ -733,19 +733,26 @@ jobs:
           echo "📊 Updated: $(date +'%Y-%m-%d %H:%M UTC')"
           echo "🔄 Source: LiteLLM commit ${{ steps.check_changes.outputs.litellm_commit }}"
 
-      # 14. Append pricing-file commit changelog to the release body
-      - name: Append pricing changelog to release notes
-        if: steps.check_changes.outputs.has_changes == 'true' && steps.get_release.outputs.has_release == 'true'
+      # 14. Create comprehensive pricing updates summary in release body
+      - name: Create pricing updates summary in release notes
+        if: steps.get_release.outputs.has_release == 'true' && (steps.check_changes.outputs.has_changes == 'true' || github.event_name == 'workflow_dispatch')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           LAST_SHA="${{ steps.check_changes.outputs.last_processed_commit }}"
           NEW_SHA="${{ steps.check_changes.outputs.litellm_commit }}"
 
-          # Skip if this is the very first run (no previous SHA)
+          # This step creates a comprehensive summary of ALL pricing updates
+          # It extracts existing entries from previous sections and combines them with new ones
+          # The result is a single "Pricing Updates Summary" section that replaces all individual sections
+
+          # Skip if this is the very first run (no previous SHA) and not a manual trigger
           if [ -z "$LAST_SHA" ] || [ "$LAST_SHA" = "none" ]; then
-            echo "No previous commit recorded – skipping changelog append"
-            exit 0
+            if [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+              echo "No previous commit recorded and not manual trigger – skipping summary creation"
+              exit 0
+            fi
+            echo "Manual trigger detected – will consolidate any existing entries"
           fi
 
           echo "Building changelog from $LAST_SHA to $NEW_SHA …"
@@ -755,8 +762,17 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/releases/${{ steps.get_release.outputs.release_id }}")
           OLD_BODY=$(echo "$RELEASE_JSON" | jq -r '.body')
 
-          # Collect already-listed short SHAs (8 chars) to avoid duplicates
-          EXISTING_SHAS=$(echo "$OLD_BODY" | grep -oE '[0-9a-f]{8}' | sort -u | tr '\n' ' ')
+          # Extract all existing pricing update entries and collect SHAs
+          EXISTING_ENTRIES_FILE=$(mktemp)
+          EXISTING_SHAS=""
+          
+          if [ -n "$OLD_BODY" ] && [ "$OLD_BODY" != "null" ]; then
+            # Extract all entries from existing pricing update sections
+            echo "$OLD_BODY" | grep -E '^[•-] [0-9]{4}-[0-9]{2}-[0-9]{2} ·' >> "$EXISTING_ENTRIES_FILE" 2>/dev/null || true
+            
+            # Collect already-listed short SHAs (8 chars) to avoid duplicates
+            EXISTING_SHAS=$(echo "$OLD_BODY" | grep -oE '[0-9a-f]{8}' | sort -u | tr '\n' ' ')
+          fi
 
           # Query commits in the LiteLLM repository range (not local repo)
           RANGE_JSON=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
@@ -789,32 +805,65 @@ jobs:
             ENTRY_COUNT=$((ENTRY_COUNT + 1))
           done
 
-          if [ "$ENTRY_COUNT" -eq 0 ]; then
-            echo "No new entries to add"
-            rm -f "$CHANGELOG_FILE"
+          # Always create summary, even if no new entries (to consolidate existing ones)
+          ALL_ENTRIES_FILE=$(mktemp)
+          
+          # Combine existing entries with new ones
+          if [ -f "$EXISTING_ENTRIES_FILE" ]; then
+            cat "$EXISTING_ENTRIES_FILE" >> "$ALL_ENTRIES_FILE"
+          fi
+          if [ "$ENTRY_COUNT" -gt 0 ]; then
+            cat "$CHANGELOG_FILE" >> "$ALL_ENTRIES_FILE"
+          fi
+          
+          # Sort all entries by date (newest first)
+          SORTED_ENTRIES_FILE=$(mktemp)
+          if [ -s "$ALL_ENTRIES_FILE" ]; then
+            sort -r -k2,2 "$ALL_ENTRIES_FILE" > "$SORTED_ENTRIES_FILE"
+          fi
+          
+          TOTAL_ENTRIES=$(wc -l < "$SORTED_ENTRIES_FILE" 2>/dev/null || echo "0")
+          
+          if [ "$TOTAL_ENTRIES" -eq 0 ]; then
+            echo "No pricing update entries found (neither existing nor new)"
+            rm -f "$CHANGELOG_FILE" "$EXISTING_ENTRIES_FILE" "$ALL_ENTRIES_FILE" "$SORTED_ENTRIES_FILE"
             exit 0
           fi
 
-          # Build the new section with proper markdown formatting
+          # Remove all existing pricing update sections from the old body
+          CLEAN_BODY=""
+          if [ -n "$OLD_BODY" ] && [ "$OLD_BODY" != "null" ]; then
+            # Remove pricing update sections and clean up extra newlines
+            CLEAN_BODY=$(echo "$OLD_BODY" | sed -E '
+              /^### 🔄 Pricing Updates/,/^(###|$)/ {
+                /^### 🔄 Pricing Updates/d
+                /^---$/d
+                /^[•-] [0-9]{4}-[0-9]{2}-[0-9]{2} ·/d
+                /^$/d
+                /^###/!d
+              }
+            ' | sed -E ':a;N;$!ba;s/\n\n\n+/\n\n/g')
+          fi
+
+          # Build the comprehensive pricing updates section
           {
-            echo ""
+            if [ -n "$CLEAN_BODY" ]; then
+              echo "$CLEAN_BODY"
+              echo ""
+            fi
             echo "---"
             echo ""
-            echo "### 🔄 Pricing Updates (\`${LAST_SHA:0:8}\` → \`${NEW_SHA:0:8}\`)"
+            echo "### 🔄 Pricing Updates Summary"
             echo ""
-            cat "$CHANGELOG_FILE"
+            echo "*Comprehensive list of all LiteLLM pricing data updates ($TOTAL_ENTRIES total):*"
             echo ""
-          } > new_section.md
-
-          # Combine old body with new section
-          if [ -n "$OLD_BODY" ] && [ "$OLD_BODY" != "null" ]; then
-            {
-              echo "$OLD_BODY"
-              cat new_section.md
-            } > combined_body.md
-          else
-            cp new_section.md combined_body.md
-          fi
+            cat "$SORTED_ENTRIES_FILE"
+            echo ""
+            if [ "$ENTRY_COUNT" -gt 0 ]; then
+              echo "*Latest update: \`${NEW_SHA:0:8}\` (added $ENTRY_COUNT new entries)*"
+              echo ""
+            fi
+          } > combined_body.md
 
           # Create JSON payload with proper escaping
           jq -n --rawfile body combined_body.md '{body: $body}' > payload.json
@@ -826,16 +875,20 @@ jobs:
             -d @payload.json \
             "https://api.github.com/repos/${{ github.repository }}/releases/${{ steps.get_release.outputs.release_id }}"
 
-          echo "✅ Changelog appended to release notes"
-          echo "📊 Added $ENTRY_COUNT pricing update entries"
+          echo "✅ Pricing updates summary created in release notes"
+          echo "📊 Total entries: $TOTAL_ENTRIES (added $ENTRY_COUNT new entries)"
           
           # Cleanup
-          rm -f "$CHANGELOG_FILE" new_section.md combined_body.md payload.json
+          rm -f "$CHANGELOG_FILE" "$EXISTING_ENTRIES_FILE" "$ALL_ENTRIES_FILE" "$SORTED_ENTRIES_FILE" combined_body.md payload.json
 
-      # 11. Report no changes (when no updates needed)
+      # 15. Report no changes (when no updates needed)
       - name: Report no changes
         if: steps.check_changes.outputs.has_changes == 'false'
         run: |
           echo "✅ No changes detected in LiteLLM pricing data since last run"
           echo "📅 Last processed commit: ${{ steps.check_changes.outputs.litellm_commit }}"
-          echo "⏭️ Skipping unnecessary processing and release creation"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "ℹ️ Manual trigger may still consolidate existing pricing entries in release notes"
+          else
+            echo "⏭️ Skipping unnecessary processing and release creation"
+          fi
