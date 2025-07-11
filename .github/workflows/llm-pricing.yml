@@ -11,7 +11,7 @@ on:
 
   # Runs every 4 hours to check for LiteLLM changes (but only processes if changes detected)
   schedule:
-    - cron: '0 */4 * * *'  # Every 4 hours
+    - cron: '0 0 * * *'  # Every day at midnight UTC
 
   # Runs when pricing-related files change
   push:
@@ -94,14 +94,24 @@ jobs:
             fi
           fi
           
-          # Compare commits
-          if [ "$LITELLM_COMMIT" != "$LAST_COMMIT" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "Changes detected or manual trigger - proceeding with update"
+          # Compare commits to detect actual changes
+          if [ "$LITELLM_COMMIT" != "$LAST_COMMIT" ]; then
+            echo "✅ Changes detected in LiteLLM data - proceeding with update"
             echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "should_process=true" >> $GITHUB_OUTPUT
             echo "$LITELLM_COMMIT" > last_commit_cache.txt
           else
-            echo "No changes detected - skipping update"
+            echo "📋 No changes in LiteLLM data since last check"
             echo "has_changes=false" >> $GITHUB_OUTPUT
+            
+            # Manual trigger allows processing for maintenance (e.g., consolidating release notes)
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              echo "🔧 Manual trigger detected - allowing processing for maintenance"
+              echo "should_process=true" >> $GITHUB_OUTPUT
+            else
+              echo "⏭️ Skipping processing - no changes and not manual trigger"
+              echo "should_process=false" >> $GITHUB_OUTPUT
+            fi
           fi
           
           echo "litellm_commit=$LITELLM_COMMIT" >> $GITHUB_OUTPUT
@@ -648,7 +658,7 @@ jobs:
           name: LiteLLM Pricing Data # Name of the artifact bundle
           path: llm_pricing_data.json # Path in the root
 
-      # 9. Upload the generated JSON as a release asset (only on release trigger)
+      # 9. Upload the generated JSON as a release asset (only on release trigger with actual changes)
       - name: Upload Release Asset
         if: github.event_name == 'release' && steps.check_changes.outputs.has_changes == 'true'
         uses: actions/upload-release-asset@v1
@@ -662,7 +672,7 @@ jobs:
 
       # 10. Add pricing data to latest existing release (for scheduled runs and manual triggers)
       - name: Get Latest Release Info
-        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && steps.check_changes.outputs.has_changes == 'true'
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && steps.check_changes.outputs.should_process == 'true'
         id: get_release
         run: |
           # Get the latest release info
@@ -716,9 +726,9 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/releases/assets/${{ steps.check_asset.outputs.existing_asset_id }}"
           echo "Existing asset deleted successfully"
 
-      # 13. Upload new pricing data to the latest release
+      # 13. Upload new pricing data to the latest release (only when there are actual changes)
       - name: Upload Pricing Data to Latest Release
-        if: steps.get_release.outputs.has_release == 'true'
+        if: steps.get_release.outputs.has_release == 'true' && steps.check_changes.outputs.has_changes == 'true'
         run: |
           echo "Uploading pricing data to release: ${{ steps.get_release.outputs.release_name }}"
 
@@ -733,18 +743,22 @@ jobs:
           echo "📊 Updated: $(date +'%Y-%m-%d %H:%M UTC')"
           echo "🔄 Source: LiteLLM commit ${{ steps.check_changes.outputs.litellm_commit }}"
 
-      # 14. Create comprehensive pricing updates summary in release body
-      - name: Create pricing updates summary in release notes
-        if: steps.get_release.outputs.has_release == 'true' && (steps.check_changes.outputs.has_changes == 'true' || github.event_name == 'workflow_dispatch')
+      # 14. Create comprehensive pricing updates section in release body
+      - name: Create pricing updates section in release notes
+        if: steps.get_release.outputs.has_release == 'true' && steps.check_changes.outputs.should_process == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           LAST_SHA="${{ steps.check_changes.outputs.last_processed_commit }}"
           NEW_SHA="${{ steps.check_changes.outputs.litellm_commit }}"
 
-          # This step creates a comprehensive summary of ALL pricing updates
+          # This step creates a comprehensive section of ALL pricing updates
           # It extracts existing entries from previous sections and combines them with new ones
-          # The result is a single "Pricing Updates Summary" section that replaces all individual sections
+          # The result is a single "Pricing Updates" section that replaces all individual sections
+          # 
+          # This step runs for:
+          # 1. Actual changes: adds new entries to the summary
+          # 2. Manual triggers: consolidates existing entries even without new changes
 
           # Skip if this is the very first run (no previous SHA) and not a manual trigger
           if [ -z "$LAST_SHA" ] || [ "$LAST_SHA" = "none" ]; then
@@ -853,9 +867,7 @@ jobs:
             fi
             echo "---"
             echo ""
-            echo "### 🔄 Pricing Updates Summary"
-            echo ""
-            echo "*Comprehensive list of all LiteLLM pricing data updates ($TOTAL_ENTRIES total):*"
+                         echo "### 🔄 Pricing Updates"
             echo ""
             cat "$SORTED_ENTRIES_FILE"
             echo ""
@@ -875,20 +887,35 @@ jobs:
             -d @payload.json \
             "https://api.github.com/repos/${{ github.repository }}/releases/${{ steps.get_release.outputs.release_id }}"
 
-          echo "✅ Pricing updates summary created in release notes"
+          echo "✅ Pricing updates section created in release notes"
           echo "📊 Total entries: $TOTAL_ENTRIES (added $ENTRY_COUNT new entries)"
           
           # Cleanup
           rm -f "$CHANGELOG_FILE" "$EXISTING_ENTRIES_FILE" "$ALL_ENTRIES_FILE" "$SORTED_ENTRIES_FILE" combined_body.md payload.json
 
-      # 15. Report no changes (when no updates needed)
+      # 15. Report no changes (when no processing needed)
       - name: Report no changes
-        if: steps.check_changes.outputs.has_changes == 'false'
+        if: steps.check_changes.outputs.should_process == 'false'
         run: |
           echo "✅ No changes detected in LiteLLM pricing data since last run"
           echo "📅 Last processed commit: ${{ steps.check_changes.outputs.litellm_commit }}"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "ℹ️ Manual trigger may still consolidate existing pricing entries in release notes"
+          echo "⏭️ Skipping all processing - no changes and not manual trigger"
+
+      # 16. Show workflow summary
+      - name: Show workflow summary
+        if: always()
+        run: |
+          echo "## 📋 Workflow Summary"
+          echo "Trigger: ${{ github.event_name }}"
+          echo "Has Changes: ${{ steps.check_changes.outputs.has_changes }}"
+          echo "Should Process: ${{ steps.check_changes.outputs.should_process }}"
+          echo "LiteLLM Commit: ${{ steps.check_changes.outputs.litellm_commit }}"
+          echo "Last Processed: ${{ steps.check_changes.outputs.last_processed_commit }}"
+          echo ""
+          if [ "${{ steps.check_changes.outputs.has_changes }}" = "true" ]; then
+            echo "✅ New LiteLLM pricing data detected - full processing performed"
+          elif [ "${{ steps.check_changes.outputs.should_process }}" = "true" ]; then
+            echo "🔧 Manual trigger - maintenance processing performed (no new data)"
           else
-            echo "⏭️ Skipping unnecessary processing and release creation"
+            echo "😴 No changes, no manual trigger - workflow skipped most steps"
           fi
