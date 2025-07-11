@@ -12,13 +12,7 @@ on:
   # Runs every 4 hours to check for LiteLLM changes (but only processes if changes detected)
   schedule:
     - cron: '0 0 * * *'  # Every day at midnight UTC
-
-  # Runs when pricing-related files change
-  push:
-    paths:
-      - 'convert_litellm_robust.py'
-      - '.github/workflows/preprocess-ts-data.yml'
-
+    
 jobs:
   preprocess:
     runs-on: ubuntu-latest # Use a standard Linux runner
