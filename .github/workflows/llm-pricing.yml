@@ -12,7 +12,7 @@ on:
   # Runs every 4 hours to check for LiteLLM changes (but only processes if changes detected)
   schedule:
     - cron: '0 0 * * *'  # Every day at midnight UTC
-    
+
 jobs:
   preprocess:
     runs-on: ubuntu-latest # Use a standard Linux runner
@@ -123,6 +123,7 @@ jobs:
 
       # 4. Create the enhanced Python converter script
       - name: Create Enhanced Python Converter
+        if: steps.check_changes.outputs.should_process == 'true'
         run: |
           cat > convert_litellm_robust.py << 'EOF'
           #!/usr/bin/env python3
@@ -665,238 +666,103 @@ jobs:
           asset_content_type: application/json          # MIME type
 
       # 10. Add pricing data to latest existing release (for scheduled runs and manual triggers)
-      - name: Get Latest Release Info
+      - name: Manage latest release assets
         if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && steps.check_changes.outputs.should_process == 'true'
-        id: get_release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Get the latest release info
-          LATEST_RELEASE=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          # Get latest release
+          LATEST_RELEASE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/${{ github.repository }}/releases/latest")
 
           RELEASE_ID=$(echo "$LATEST_RELEASE" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('id', ''))")
-          RELEASE_TAG=$(echo "$LATEST_RELEASE" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('tag_name', ''))")
-          RELEASE_NAME=$(echo "$LATEST_RELEASE" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('name', ''))")
           UPLOAD_URL=$(echo "$LATEST_RELEASE" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('upload_url', '').replace('{?name,label}', ''))")
 
           if [ -z "$RELEASE_ID" ] || [ "$RELEASE_ID" = "null" ]; then
-            echo "No existing releases found. Skipping pricing data upload."
-            echo "has_release=false" >> $GITHUB_OUTPUT
-          else
-            echo "Found latest release: $RELEASE_NAME ($RELEASE_TAG)"
-            echo "Release ID: $RELEASE_ID"
-            echo "Upload URL: $UPLOAD_URL"
-            echo "has_release=true" >> $GITHUB_OUTPUT
-            echo "release_id=$RELEASE_ID" >> $GITHUB_OUTPUT
-            echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
-            echo "release_name=$RELEASE_NAME" >> $GITHUB_OUTPUT
-            echo "upload_url=$UPLOAD_URL" >> $GITHUB_OUTPUT
+            echo "No existing releases found"
+            exit 0
           fi
 
-      # 11. Check if pricing data file already exists in the release
-      - name: Check Existing Asset
-        if: steps.get_release.outputs.has_release == 'true'
-        id: check_asset
-        run: |
-          # Check if llm_pricing_data.json already exists in the release
-          EXISTING_ASSET=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/${{ steps.get_release.outputs.release_id }}/assets" | \
+          # Check for existing asset and delete if found
+          EXISTING_ASSET=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets" | \
             python3 -c "import sys, json; data = json.load(sys.stdin); assets = [a for a in data if a.get('name') == 'llm_pricing_data.json']; print(assets[0].get('id', '') if assets else '')")
 
           if [ -n "$EXISTING_ASSET" ] && [ "$EXISTING_ASSET" != "null" ]; then
-            echo "Found existing pricing data asset: $EXISTING_ASSET"
-            echo "existing_asset_id=$EXISTING_ASSET" >> $GITHUB_OUTPUT
-            echo "needs_deletion=true" >> $GITHUB_OUTPUT
-          else
-            echo "No existing pricing data asset found"
-            echo "needs_deletion=false" >> $GITHUB_OUTPUT
+            curl -X DELETE -H "Authorization: token $GITHUB_TOKEN" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/assets/$EXISTING_ASSET"
           fi
 
-      # 12. Delete existing pricing data file if it exists
-      - name: Delete Existing Asset
-        if: steps.check_asset.outputs.needs_deletion == 'true'
-        run: |
-          echo "Deleting existing pricing data file..."
-          curl -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/assets/${{ steps.check_asset.outputs.existing_asset_id }}"
-          echo "Existing asset deleted successfully"
+          # Upload new pricing data if changes detected
+          if [ "${{ steps.check_changes.outputs.has_changes }}" = "true" ]; then
+            curl -X POST \
+              -H "Authorization: token $GITHUB_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data-binary @llm_pricing_data.json \
+              "$UPLOAD_URL?name=llm_pricing_data.json&label=LLM%20Pricing%20Data"
+          fi
 
-      # 13. Upload new pricing data to the latest release (only when there are actual changes)
-      - name: Upload Pricing Data to Latest Release
-        if: steps.get_release.outputs.has_release == 'true' && steps.check_changes.outputs.has_changes == 'true'
-        run: |
-          echo "Uploading pricing data to release: ${{ steps.get_release.outputs.release_name }}"
-
-          # Upload the new pricing data file
-          curl -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            --data-binary @llm_pricing_data.json \
-            "${{ steps.get_release.outputs.upload_url }}?name=llm_pricing_data.json&label=LLM%20Pricing%20Data"
-
-          echo "✅ Successfully uploaded pricing data to release ${{ steps.get_release.outputs.release_tag }}"
-          echo "📊 Updated: $(date +'%Y-%m-%d %H:%M UTC')"
-          echo "🔄 Source: LiteLLM commit ${{ steps.check_changes.outputs.litellm_commit }}"
-
-      # 14. Create comprehensive pricing updates section in release body
-      - name: Create pricing updates section in release notes
-        if: steps.get_release.outputs.has_release == 'true' && steps.check_changes.outputs.should_process == 'true'
+      # 11. Check if pricing data file already exists in the release
+      - name: Update release notes
+        if: steps.check_changes.outputs.should_process == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           LAST_SHA="${{ steps.check_changes.outputs.last_processed_commit }}"
           NEW_SHA="${{ steps.check_changes.outputs.litellm_commit }}"
 
-          # This step creates a comprehensive section of ALL pricing updates
-          # It extracts existing entries from previous sections and combines them with new ones
-          # The result is a single "Pricing Updates" section that replaces all individual sections
-          # 
-          # This step runs for:
-          # 1. Actual changes: adds new entries to the summary
-          # 2. Manual triggers: consolidates existing entries even without new changes
+          # Get latest release
+          LATEST_RELEASE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/latest")
+          RELEASE_ID=$(echo "$LATEST_RELEASE" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('id', ''))")
 
-          # Skip if this is the very first run (no previous SHA) and not a manual trigger
-          if [ -z "$LAST_SHA" ] || [ "$LAST_SHA" = "none" ]; then
-            if [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
-              echo "No previous commit recorded and not manual trigger – skipping summary creation"
-              exit 0
-            fi
-            echo "Manual trigger detected – will consolidate any existing entries"
-          fi
-
-          echo "Building changelog from $LAST_SHA to $NEW_SHA …"
-
-          # Fetch current release body
-          RELEASE_JSON=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/${{ steps.get_release.outputs.release_id }}")
-          OLD_BODY=$(echo "$RELEASE_JSON" | jq -r '.body')
-
-          # Extract all existing pricing update entries and collect SHAs
-          EXISTING_ENTRIES_FILE=$(mktemp)
-          EXISTING_SHAS=""
-          
-          if [ -n "$OLD_BODY" ] && [ "$OLD_BODY" != "null" ]; then
-            # Extract all entries from existing pricing update sections
-            echo "$OLD_BODY" | grep -E '^[•-] [0-9]{4}-[0-9]{2}-[0-9]{2} ·' >> "$EXISTING_ENTRIES_FILE" 2>/dev/null || true
-            
-            # Collect already-listed short SHAs (8 chars) to avoid duplicates
-            EXISTING_SHAS=$(echo "$OLD_BODY" | grep -oE '[0-9a-f]{8}' | sort -u | tr '\n' ' ')
-          fi
-
-          # Query commits in the LiteLLM repository range (not local repo)
-          RANGE_JSON=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-            "https://api.github.com/repos/BerriAI/litellm/compare/$LAST_SHA...$NEW_SHA")
-
-          LITELLM_API="https://api.github.com/repos/BerriAI/litellm"
-
-          # Create changelog entries file
-          CHANGELOG_FILE=$(mktemp)
-          ENTRY_COUNT=0
-          
-          for SHA in $(echo "$RANGE_JSON" | jq -r '.commits[].sha'); do
-            SHORT=${SHA:0:8}
-            if echo " $EXISTING_SHAS " | grep -q " $SHORT "; then
-              # Already documented
-              continue
-            fi
-
-            # Check if this specific commit touches the pricing file in LiteLLM repo
-            HIT=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "$LITELLM_API/commits/$SHA" | \
-              jq -r '.files[].filename' | grep -c 'model_prices_and_context_window.json' || true)
-            if [ "$HIT" -eq 0 ]; then
-              continue
-            fi
-
-            DATE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "$LITELLM_API/commits/$SHA" | jq -r '.commit.committer.date' | cut -dT -f1)
-            TITLE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "$LITELLM_API/commits/$SHA" | jq -r '.commit.message' | head -n1)
-            COMMIT_URL="https://github.com/BerriAI/litellm/commit/${SHA}"
-            echo "- ${DATE} · [\`${SHORT}\`](${COMMIT_URL}) · ${TITLE}" >> "$CHANGELOG_FILE"
-            ENTRY_COUNT=$((ENTRY_COUNT + 1))
-          done
-
-          # Always create summary, even if no new entries (to consolidate existing ones)
-          ALL_ENTRIES_FILE=$(mktemp)
-          
-          # Combine existing entries with new ones
-          if [ -f "$EXISTING_ENTRIES_FILE" ]; then
-            cat "$EXISTING_ENTRIES_FILE" >> "$ALL_ENTRIES_FILE"
-          fi
-          if [ "$ENTRY_COUNT" -gt 0 ]; then
-            cat "$CHANGELOG_FILE" >> "$ALL_ENTRIES_FILE"
-          fi
-          
-          # Sort all entries by date (newest first)
-          SORTED_ENTRIES_FILE=$(mktemp)
-          if [ -s "$ALL_ENTRIES_FILE" ]; then
-            sort -r -k2,2 "$ALL_ENTRIES_FILE" > "$SORTED_ENTRIES_FILE"
-          fi
-          
-          TOTAL_ENTRIES=$(wc -l < "$SORTED_ENTRIES_FILE" 2>/dev/null || echo "0")
-          
-          if [ "$TOTAL_ENTRIES" -eq 0 ]; then
-            echo "No pricing update entries found (neither existing nor new)"
-            rm -f "$CHANGELOG_FILE" "$EXISTING_ENTRIES_FILE" "$ALL_ENTRIES_FILE" "$SORTED_ENTRIES_FILE"
+          if [ -z "$RELEASE_ID" ] || [ "$RELEASE_ID" = "null" ]; then
+            echo "No release to update"
             exit 0
           fi
 
-          # Remove all existing pricing update sections from the old body
-          CLEAN_BODY=""
-          if [ -n "$OLD_BODY" ] && [ "$OLD_BODY" != "null" ]; then
-            # Remove pricing update sections and clean up extra newlines
-            CLEAN_BODY=$(echo "$OLD_BODY" | sed -E '
-              /^### 🔄 Pricing Updates/,/^(###|$)/ {
-                /^### 🔄 Pricing Updates/d
-                /^---$/d
-                /^[•-] [0-9]{4}-[0-9]{2}-[0-9]{2} ·/d
-                /^$/d
-                /^###/!d
-              }
-            ' | sed -E ':a;N;$!ba;s/\n\n\n+/\n\n/g')
-          fi
+                     # Build pricing updates section intelligently
+           if [ "${{ steps.check_changes.outputs.has_changes }}" = "true" ] && [ -n "$LAST_SHA" ] && [ "$LAST_SHA" != "none" ]; then
+             DATE=$(date '+%Y-%m-%d')
+             NEW_ENTRY="- ${DATE} · [\`${NEW_SHA}\`](https://github.com/BerriAI/litellm/commit/${NEW_SHA}) · Updated pricing data"
+             
+             # Get current body
+             OLD_BODY=$(echo "$LATEST_RELEASE" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('body', ''))")
+             
+             # Smart release body management - avoid duplicates
+             if echo "$OLD_BODY" | grep -q "$NEW_SHA"; then
+               echo "Entry already exists, skipping duplicate"
+               echo "$OLD_BODY" > release_body.md
+             else
+               NEW_ENTRY="- $DATE · [\`$NEW_SHA\`](https://github.com/BerriAI/litellm/commit/$NEW_SHA) · Updated pricing data"
+               
+               # Check if pricing section exists
+               if echo "$OLD_BODY" | grep -q "### 🔄 Pricing Updates"; then
+                 # Update existing section by adding entry at top and updating latest commit
+                 echo "$OLD_BODY" | sed -e "/### 🔄 Pricing Updates/a $NEW_ENTRY" -e "s/\\*Latest update: \`[^\\`]*\`\\*/\\*Latest update: \`$NEW_SHA\`\\*/" > release_body.md
+               else
+                 # Add new pricing section
+                 echo "$OLD_BODY" > release_body.md
+                 [ -n "$OLD_BODY" ] && echo -e "\n---\n" >> release_body.md
+                 echo -e "### 🔄 Pricing Updates\n\n$NEW_ENTRY\n\n*Latest update: \`$NEW_SHA\`*" >> release_body.md
+               fi
+             fi
 
-          # Build the comprehensive pricing updates section
-          {
-            if [ -n "$CLEAN_BODY" ]; then
-              echo "$CLEAN_BODY"
-              echo ""
-            fi
-            echo "---"
-            echo ""
-                         echo "### 🔄 Pricing Updates"
-            echo ""
-            cat "$SORTED_ENTRIES_FILE"
-            echo ""
-            if [ "$ENTRY_COUNT" -gt 0 ]; then
-              echo "*Latest update: \`${NEW_SHA:0:8}\` (added $ENTRY_COUNT new entries)*"
-              echo ""
-            fi
-          } > combined_body.md
+             # Update release only if changes were made
+             if [ -s release_body.md ]; then
+               jq -n --rawfile body release_body.md '{body: $body}' | \
+               curl -s -X PATCH \
+                 -H "Authorization: token $GITHUB_TOKEN" \
+                 -H "Content-Type: application/json" \
+                 -d @- \
+                 "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID"
+             fi
+               
+             rm -f release_body.md
+           fi
 
-          # Create JSON payload with proper escaping
-          jq -n --rawfile body combined_body.md '{body: $body}' > payload.json
-
-          # Update release
-          curl -s -X PATCH \
-            -H "Authorization: token $GITHUB_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d @payload.json \
-            "https://api.github.com/repos/${{ github.repository }}/releases/${{ steps.get_release.outputs.release_id }}"
-
-          echo "✅ Pricing updates section created in release notes"
-          echo "📊 Total entries: $TOTAL_ENTRIES (added $ENTRY_COUNT new entries)"
-          
-          # Cleanup
-          rm -f "$CHANGELOG_FILE" "$EXISTING_ENTRIES_FILE" "$ALL_ENTRIES_FILE" "$SORTED_ENTRIES_FILE" combined_body.md payload.json
-
-      # 15. Report no changes (when no processing needed)
-      - name: Report no changes
-        if: steps.check_changes.outputs.should_process == 'false'
-        run: |
-          echo "✅ No changes detected in LiteLLM pricing data since last run"
-          echo "📅 Last processed commit: ${{ steps.check_changes.outputs.litellm_commit }}"
-          echo "⏭️ Skipping all processing - no changes and not manual trigger"
-
-      # 16. Show workflow summary
-      - name: Show workflow summary
+      # 12. Delete existing pricing data file if it exists
+      - name: Report status
         if: always()
         run: |
           echo "## 📋 Workflow Summary"
@@ -904,12 +770,11 @@ jobs:
           echo "Has Changes: ${{ steps.check_changes.outputs.has_changes }}"
           echo "Should Process: ${{ steps.check_changes.outputs.should_process }}"
           echo "LiteLLM Commit: ${{ steps.check_changes.outputs.litellm_commit }}"
-          echo "Last Processed: ${{ steps.check_changes.outputs.last_processed_commit }}"
-          echo ""
+          
           if [ "${{ steps.check_changes.outputs.has_changes }}" = "true" ]; then
-            echo "✅ New LiteLLM pricing data detected - full processing performed"
+            echo "✅ New LiteLLM pricing data processed"
           elif [ "${{ steps.check_changes.outputs.should_process }}" = "true" ]; then
-            echo "🔧 Manual trigger - maintenance processing performed (no new data)"
+            echo "🔧 Maintenance processing completed"
           else
-            echo "😴 No changes, no manual trigger - workflow skipped most steps"
+            echo "😴 No changes detected - workflow skipped"
           fi
