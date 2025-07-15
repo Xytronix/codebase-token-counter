@@ -746,7 +746,7 @@ jobs:
                  # Add new pricing section
                  echo "$OLD_BODY" > release_body.md
                  [ -n "$OLD_BODY" ] && echo -e "\n---\n" >> release_body.md
-                 echo -e "### 🔄 Pricing Updates\n\n$NEW_ENTRY\n\n*Latest update: \`$NEW_SHA\`*" >> release_body.md
+                 echo -e "### 🔄 Pricing Updates\n$NEW_ENTRY\n*Latest update: \`$NEW_SHA\`*" >> release_body.md
                fi
              fi
 
