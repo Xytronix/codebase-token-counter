@@ -739,7 +739,7 @@ jobs:
                # Check if pricing section exists
                if echo "$OLD_BODY" | grep -q "### 🔄 Pricing Updates"; then
                  # Update existing section by adding entry at top and updating latest commit
-                 echo "$OLD_BODY" | sed -e "/### 🔄 Pricing Updates/a $NEW_ENTRY" -e "s/\\*Latest update: \`[^\\`]*\`\\*/\\*Latest update: \`$NEW_SHA\`\\*/" > release_body.md
+                 echo "$OLD_BODY" | sed -e "/### 🔄 Pricing Updates/a $NEW_ENTRY" -e "s/\\*Latest update: \\\`[^\\`]*\\`\\*/\\*Latest update: \\`$NEW_SHA\\`\\*/" > release_body.md
                else
                  # Add new pricing section
                  echo "$OLD_BODY" > release_body.md
