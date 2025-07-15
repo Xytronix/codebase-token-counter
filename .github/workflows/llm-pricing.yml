@@ -621,16 +621,16 @@ jobs:
             exit 1
           fi
 
-      # 6. Configure Git in the workflow runner (only if changes detected)
+      # 6. Configure Git # disabled – we now keep hash only in cache, no repo commits
       - name: Configure Git
-        if: steps.check_changes.outputs.has_changes == 'true'
+        if: false
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
 
-      # 7. Commit the tracking file (only if changes detected)
+      # 7. Commit tracking file # disabled – no longer committing tracking file
       - name: Commit tracking file
-        if: steps.check_changes.outputs.has_changes == 'true'
+        if: false
         run: |
           # Ensure we're on the correct branch
           git checkout ${{ github.head_ref || github.ref_name || 'main' }}
