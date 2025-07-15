@@ -9,7 +9,7 @@ on:
   release:
     types: [published]
 
-  # Runs every 4 hours to check for LiteLLM changes (but only processes if changes detected)
+  # Runs every day to check for LiteLLM changes (but only processes if changes detected)
   schedule:
     - cron: '0 0 * * *'  # Every day at midnight UTC
 
@@ -724,7 +724,7 @@ jobs:
                      # Build pricing updates section intelligently
            if [ "${{ steps.check_changes.outputs.has_changes }}" = "true" ] && [ -n "$LAST_SHA" ] && [ "$LAST_SHA" != "none" ]; then
              DATE=$(date '+%Y-%m-%d')
-             NEW_ENTRY="- ${DATE} · [\`${NEW_SHA}\`](https://github.com/BerriAI/litellm/commit/${NEW_SHA}) · Updated pricing data"
+             NEW_ENTRY="- ${DATE} · [\\\`${NEW_SHA}\\\`](https://github.com/BerriAI/litellm/commit/${NEW_SHA}) · Updated pricing data"
              
              # Get current body
              OLD_BODY=$(echo "$LATEST_RELEASE" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('body', ''))")
@@ -734,7 +734,7 @@ jobs:
                echo "Entry already exists, skipping duplicate"
                echo "$OLD_BODY" > release_body.md
              else
-               NEW_ENTRY="- $DATE · [\`$NEW_SHA\`](https://github.com/BerriAI/litellm/commit/$NEW_SHA) · Updated pricing data"
+               NEW_ENTRY="- $DATE · [\\\`$NEW_SHA\\\`](https://github.com/BerriAI/litellm/commit/$NEW_SHA) · Updated pricing data"
                
                # Check if pricing section exists
                if echo "$OLD_BODY" | grep -q "### 🔄 Pricing Updates"; then
