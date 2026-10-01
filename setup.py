@@ -15,6 +15,7 @@ setup(
     long_description_content_type="text/markdown",
     url="https://github.com/Xytronix/codebase-token-counter",
     packages=find_packages(),
+    package_data={"codebase_token_counter": ["model_registry.json"]},
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",

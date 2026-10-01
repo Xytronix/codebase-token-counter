@@ -1,3 +1,4 @@
 include requirements.txt
 include README.md
 include LICENSE*
+include codebase_token_counter/model_registry.json

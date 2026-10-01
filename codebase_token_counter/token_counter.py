@@ -16,7 +16,6 @@ import sys
 import shutil
 import tempfile
 import warnings
-import json
 import argparse
 import chardet
 from pathlib import Path
@@ -32,6 +31,15 @@ from rich.console import Console
 from rich.table import Table
 from rich.progress import track
 from rich import print as rprint
+
+try:
+    from codebase_token_counter.model_registry import (
+        PROVIDERS,
+        ModelRecord,
+        load_model_registry,
+    )
+except ModuleNotFoundError:  # Support running token_counter.py directly.
+    from model_registry import PROVIDERS, ModelRecord, load_model_registry
 
 # Initialize the console and tokenizer
 warnings.filterwarnings('ignore')
@@ -764,6 +772,71 @@ def process_repository(repo_path: str, config: TokenCounterConfig, total_only: b
 
     return total_tokens, extension_stats, file_counts, directory_stats, all_files, all_directories
 
+def _format_token_limit(token_limit: int) -> str:
+    """Format a context-window limit for the comparison table."""
+    if token_limit >= 1000000:
+        return f"{token_limit / 1000000:.1f}M"
+    if token_limit >= 1000:
+        return f"{token_limit / 1000:.0f}K"
+    return str(token_limit)
+
+
+def create_context_window_table(
+    total_tokens: int, models: List[ModelRecord]
+) -> Tuple[Table, List[str]]:
+    """Build the context comparison table using registry-owned model metadata."""
+    context_table = Table(title="\n[bold]Context Window Comparisons[/bold]")
+    context_table.add_column("Model", style="blue")
+    context_table.add_column("Input Limit", justify="right", style="cyan")
+    context_table.add_column("Input Usage", justify="right")
+    context_table.add_column("Output Limit", justify="right", style="cyan")
+    context_table.add_column("Status", justify="center")
+
+    fits_entirely = []
+    grouped_models = {provider: [] for provider in PROVIDERS}
+
+    for model in models:
+        input_percentage = (total_tokens / model.max_input_tokens) * 100
+        if input_percentage <= 100:
+            color = "green"
+            status = "✅ Fits"
+            fits_entirely.append(model.display_name)
+        elif input_percentage <= 150:
+            color = "yellow"
+            status = "⚠️  Tight"
+        else:
+            color = "red"
+            status = "❌ Too Big"
+
+        grouped_models[model.provider].append(
+            (
+                model.display_name,
+                _format_token_limit(model.max_input_tokens),
+                input_percentage,
+                color,
+                _format_token_limit(model.max_output_tokens),
+                status,
+            )
+        )
+
+    for provider_name, provider_models in grouped_models.items():
+        if not provider_models:
+            continue
+
+        context_table.add_row(f"[bold]{provider_name}[/bold]", "", "", "", "")
+        provider_models.sort(key=lambda model: model[2])
+        for model, input_limit, input_percentage, color, output_limit, status in provider_models:
+            context_table.add_row(
+                f"  {model}",
+                input_limit,
+                f"[{color}]{input_percentage:.1f}%[/{color}]",
+                output_limit,
+                status,
+            )
+
+    return context_table, fits_entirely
+
+
 def parse_arguments():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(
@@ -860,9 +933,7 @@ def main():
     try:
         total_tokens, extension_stats, file_counts, directory_stats, all_files, all_directories = process_repository(analyze_path, config, args.total, args.debug, args.files)
         
-        # Load pricing data for all models
-        pricing_data = load_pricing_data(analyze_path)
-        all_models = extract_models_from_pricing_data(pricing_data)
+        model_registry = load_model_registry()
         
     except Exception as e:
         if not args.total:
@@ -1144,196 +1215,9 @@ def main():
 
         console.print(file_table)
 
-        # Create and populate context window table with all models from pricing data
-        windows = {}
-        
-        # Add all models dynamically from pricing data
-        for model_key, (input_tokens, output_tokens) in all_models.items():
-            
-            # Create readable display names - simplified and cleaner
-            if model_key.startswith("Claude"):
-                # Extract model name after "Claude "
-                model_name = model_key[6:]  # Remove "Claude " prefix
-                if "claude-3-5-sonnet" in model_name:
-                    display_name = f"Claude 3.5 Sonnet"
-                elif "claude-3-5-haiku" in model_name:
-                    display_name = f"Claude 3.5 Haiku"
-                elif "claude-3-7-sonnet" in model_name:
-                    display_name = f"Claude 3.7 Sonnet"
-                elif "claude-opus-4" in model_name:
-                    display_name = f"Claude 4 Opus"
-                elif "claude-sonnet-4" in model_name:
-                    display_name = f"Claude 4 Sonnet"
-                else:
-                    display_name = f"Claude {model_name}"
-            elif model_key.startswith("Gemini"):
-                model_name = model_key[7:]  # Remove "Gemini " prefix
-                if "gemini-2.5" in model_name and "flash" in model_name:
-                    display_name = f"Gemini 2.5 Flash"
-                elif "gemini-2.5" in model_name and "pro" in model_name:
-                    display_name = f"Gemini 2.5 Pro"
-                elif "gemini-2.0-flash" in model_name:
-                    display_name = f"Gemini 2.0 Flash"
-                elif "gemini-2.0-pro" in model_name:
-                    display_name = f"Gemini 2.0 Pro"
-                elif "gemini-1.5-pro" in model_name:
-                    display_name = f"Gemini 1.5 Pro"
-                elif "gemini-1.5-flash" in model_name:
-                    display_name = f"Gemini 1.5 Flash"
-                elif "gemini-exp-1206" in model_name:
-                    display_name = f"Gemini Exp 1206"
-                else:
-                    display_name = f"Gemini {model_name.replace('gemini/', '').replace('gemini-', '')}"
-            elif model_key.startswith("Grok"):
-                model_name = model_key[5:]  # Remove "Grok " prefix
-                if "grok-3" in model_name:
-                    if "mini" in model_name:
-                        display_name = f"Grok 3 Mini"
-                    elif "fast" in model_name:
-                        display_name = f"Grok 3 Fast"
-                    else:
-                        display_name = f"Grok 3"
-                elif "grok-2" in model_name:
-                    display_name = f"Grok 2"
-                else:
-                    display_name = f"Grok {model_name.replace('xai/', '')}"
-            elif model_key.startswith("DeepSeek"):
-                model_name = model_key[9:]  # Remove "DeepSeek " prefix
-                if "chat" in model_name:
-                    display_name = f"DeepSeek Chat"
-                elif "coder" in model_name:
-                    display_name = f"DeepSeek Coder"
-                elif "reasoner" in model_name:
-                    display_name = f"DeepSeek Reasoner"
-                else:
-                    display_name = f"DeepSeek {model_name.replace('deepseek/', '')}"
-            elif model_key.startswith("Mistral"):
-                model_name = model_key[8:]  # Remove "Mistral " prefix
-                if "large" in model_name:
-                    display_name = f"Mistral Large"
-                elif "medium" in model_name:
-                    display_name = f"Mistral Medium"
-                elif "devstral" in model_name:
-                    display_name = f"Mistral Devstral"
-                else:
-                    display_name = f"Mistral {model_name.replace('mistral/', '')}"
-            elif model_key.startswith("Meta"):
-                model_name = model_key[5:]  # Remove "Meta " prefix
-                if "llama-4-scout" in model_name:
-                    display_name = f"Llama 4 Scout"
-                elif "llama-4-maverick" in model_name:
-                    display_name = f"Llama 4 Maverick"
-                else:
-                    display_name = f"Meta {model_name}"
-            else:
-                # OpenAI and other models
-                if model_key.startswith("gpt-4o-mini"):
-                    display_name = f"GPT-4o Mini"
-                elif model_key.startswith("gpt-4o"):
-                    display_name = f"GPT-4o"
-                elif model_key.startswith("gpt-4.1-mini"):
-                    display_name = f"GPT-4.1 Mini"
-                elif model_key.startswith("gpt-4.1-nano"):
-                    display_name = f"GPT-4.1 Nano"
-                elif model_key.startswith("gpt-4.1"):
-                    display_name = f"GPT-4.1"
-                elif model_key.startswith("o3-mini"):
-                    display_name = f"o3-mini"
-                elif model_key == "o3" or model_key.startswith("o3-2025"):
-                    display_name = f"o3"
-                elif model_key.startswith("o1-mini"):
-                    display_name = f"o1-mini"
-                elif model_key == "o1" or model_key.startswith("o1-2024"):
-                    display_name = f"o1"
-                elif model_key.startswith("o4-mini"):
-                    display_name = f"o4-mini"
-                else:
-                    display_name = f"{model_key}"
-            
-            windows[display_name] = (input_tokens, output_tokens)
-
-        context_table = Table(title="\n[bold]Context Window Comparisons[/bold]")
-        context_table.add_column("Model", style="blue")
-        context_table.add_column("Input Limit", justify="right", style="cyan")
-        context_table.add_column("Input Usage", justify="right")
-        context_table.add_column("Output Limit", justify="right", style="cyan")
-        context_table.add_column("Status", justify="center")
-
-        fits_entirely = []
-        
-        # Group models by provider for better organization
-        providers = {
-            'Anthropic': [],
-            'OpenAI': [],
-            'Google': [],
-            'xAI': [],
-            'Meta': [],
-            'DeepSeek': [],
-            'Mistral': []
-        }
-        
-        for model, (input_window, output_window) in windows.items():
-            input_percentage = (total_tokens / input_window) * 100
-            if input_percentage <= 100:
-                color = "green"
-                status = "✅ Fits"
-                fits_entirely.append(model)
-            elif input_percentage <= 150:
-                color = "yellow"
-                status = "⚠️  Tight"
-            else:
-                color = "red" 
-                status = "❌ Too Big"
-            
-            # Format input and output limits
-            if input_window >= 1000000:
-                input_str = f"{input_window/1000000:.1f}M"
-            elif input_window >= 1000:
-                input_str = f"{input_window/1000:.0f}K"
-            else:
-                input_str = f"{input_window}"
-                
-            if output_window >= 1000000:
-                output_str = f"{output_window/1000000:.1f}M"
-            elif output_window >= 1000:
-                output_str = f"{output_window/1000:.0f}K"
-            else:
-                output_str = f"{output_window}"
-            
-            # Determine provider
-            if model.startswith("Claude"):
-                providers['Anthropic'].append((model, input_str, input_percentage, color, output_str, status))
-            elif any(model.startswith(x) for x in ["GPT", "o1", "o3", "o4"]):
-                providers['OpenAI'].append((model, input_str, input_percentage, color, output_str, status))
-            elif model.startswith("Gemini"):
-                providers['Google'].append((model, input_str, input_percentage, color, output_str, status))
-            elif model.startswith("Grok"):
-                providers['xAI'].append((model, input_str, input_percentage, color, output_str, status))
-            elif model.startswith("Llama"):
-                providers['Meta'].append((model, input_str, input_percentage, color, output_str, status))
-            elif model.startswith("DeepSeek"):
-                providers['DeepSeek'].append((model, input_str, input_percentage, color, output_str, status))
-            elif model.startswith("Mistral"):
-                providers['Mistral'].append((model, input_str, input_percentage, color, output_str, status))
-        
-        # Add rows grouped by provider
-        for provider_name, models in providers.items():
-            if models:
-                # Add provider header
-                context_table.add_row(f"[bold]{provider_name}[/bold]", "", "", "", "")
-                
-                # Sort models by input percentage (fits first)
-                models.sort(key=lambda x: x[2])
-                
-                for model, input_str, input_percentage, color, output_str, status in models:
-                    context_table.add_row(
-                        f"  {model}",
-                        input_str,
-                        f"[{color}]{input_percentage:.1f}%[/{color}]", 
-                        output_str,
-                        status
-                    )
-        
+        context_table, fits_entirely = create_context_window_table(
+            total_tokens, model_registry
+        )
         console.print(context_table)
 
         # Show comprehensive strategies for fitting within context windows
@@ -1417,94 +1301,6 @@ def main():
 
     if temp_dir:
         shutil.rmtree(temp_dir)
-
-def load_pricing_data(repo_path: str) -> Dict:
-    """Load pricing data from llm_pricing_data.json if it exists."""
-    pricing_file = os.path.join(repo_path, "llm_pricing_data.json")
-    if os.path.exists(pricing_file):
-        try:
-            with open(pricing_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            console.print(f"[yellow]Warning: Could not load pricing data: {e}[/yellow]")
-    return {}
-
-def extract_models_from_pricing_data(pricing_data: Dict) -> Dict[str, Tuple[int, int]]:
-    """Extract models from specific providers and return {model_name: (input_tokens, output_tokens)}."""
-    all_models = {}
-    
-    # Only include these providers
-    allowed_providers = {'Anthropic', 'OpenAI', 'Google', 'DeepSeek', 'Mistral', 'xAI', 'Meta'}
-    
-    # Define specific models to include (latest and most relevant)
-    include_models = {
-        # Claude latest models
-        'claude-3-5-sonnet-20241022', 'claude-3-5-sonnet-latest', 'claude-3-5-haiku-20241022', 'claude-3-5-haiku-latest',
-        'claude-3-7-sonnet-20250219', 'claude-3-7-sonnet-latest', 'claude-opus-4-20250514', 'claude-sonnet-4-20250514',
-        
-        # OpenAI latest models
-        'gpt-4o-2024-11-20', 'gpt-4o-mini-2024-07-18', 'o1', 'o1-2024-12-17', 'o1-mini', 'o3', 'o3-2025-04-16', 'o3-mini', 'o4-mini',
-        'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano',
-        
-        # Google latest models  
-        'gemini-1.5-pro-002', 'gemini-1.5-flash-002', 'gemini-2.0-flash-exp', 'gemini-2.0-pro-exp',
-        'gemini-2.5-flash-preview-04-17', 'gemini-2.5-flash-preview-05-20', 'gemini-2.5-pro-exp-03-25', 'gemini-2.5-pro-preview-03-25',
-        'gemini/gemini-exp-1206', 'gemini/gemini-2.5-flash-preview-04-17', 'gemini/gemini-2.5-pro-exp-03-25',
-        
-        # xAI latest models
-        'xai/grok-2-1212', 'xai/grok-2-latest', 'xai/grok-3', 'xai/grok-3-beta', 'xai/grok-3-fast-beta', 'xai/grok-3-mini-beta',
-        
-        # DeepSeek latest
-        'deepseek/deepseek-chat', 'deepseek/deepseek-coder', 'deepseek/deepseek-reasoner',
-        
-        # Meta latest  
-        'vertex_ai/meta/llama-4-scout-17b-128e-instruct-maas', 'vertex_ai/meta/llama-4-maverick-17b-128e-instruct-maas',
-        
-        # Mistral latest
-        'mistral/mistral-large-2411', 'mistral/mistral-large-latest', 'mistral/devstral-small-2505', 'mistral/mistral-medium-2505'
-    }
-    
-    if not pricing_data or 'providers' not in pricing_data:
-        return all_models
-    
-    for provider in pricing_data['providers']:
-        provider_name = provider.get('provider', '')
-        if provider_name not in allowed_providers or 'models' not in provider:
-            continue
-            
-        for model in provider['models']:
-            name = model.get('name', '')
-            operational = model.get('operational', {})
-            
-            # Only include models in our curated list
-            if name not in include_models:
-                continue
-            
-            # Only include chat models with valid token limits
-            if operational.get('mode') == 'chat':
-                max_input = model.get('maxInputTokens', 0)
-                max_output = model.get('maxOutputTokens', 0)
-                
-                if max_input > 0 and max_output > 0:
-                    # Add provider prefix to distinguish models
-                    if provider_name == 'OpenAI':
-                        model_key = name
-                    elif provider_name == 'Anthropic':
-                        model_key = f"Claude {name}"
-                    elif provider_name == 'Google':
-                        model_key = f"Gemini {name}"
-                    elif provider_name == 'DeepSeek':
-                        model_key = f"DeepSeek {name}"
-                    elif provider_name == 'Mistral':
-                        model_key = f"Mistral {name}"
-                    elif provider_name == 'xAI':
-                        model_key = f"Grok {name}"
-                    else:
-                        model_key = f"{provider_name} {name}"
-                    
-                    all_models[model_key] = (max_input, max_output)
-    
-    return all_models
 
 def is_binary(file_path: str) -> bool:
     """Check if a file is binary."""

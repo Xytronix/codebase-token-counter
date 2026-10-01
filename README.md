@@ -24,15 +24,15 @@ A comprehensive tool for analyzing codebases to understand their token usage and
 
 ### LLM Context Window Analysis
 
-- **Comprehensive LLM Database**: Automatically updated pricing and context window data from LiteLLM
+- **Bundled Model Registry**: Reproducible context-window data that works independently of the repository being analyzed
 - **Popular Models Supported**:
-  - **OpenAI**: GPT-4o, GPT-4.1, o1, o3, o4 series
-  - **Anthropic**: Claude 3.5 Sonnet/Haiku, Claude 4 series
-  - **Google**: Gemini 1.5/2.0/2.5 Pro/Flash, Gemini Exp
-  - **xAI**: Grok 2, Grok 3 series
+  - **OpenAI**: GPT-6 Astra and GPT-5.6 Sol/Terra/Luna
+  - **Anthropic**: Claude Fable 5.1, Opus 5, Sonnet 5, and Haiku 4.5
+  - **Google**: Gemini 3.8 Flash, 3.5 Flash-Lite, and 2.5 Pro
+  - **xAI**: Grok 4.6
   - **Meta**: Llama 4 Scout/Maverick
-  - **DeepSeek**: Chat, Coder, Reasoner models
-  - **Mistral**: Large, Medium, Devstral models
+  - **DeepSeek**: DeepSeek V4 Pro/Flash
+  - **Mistral**: Mistral Large/Medium and Devstral/Devstral Small
 - **Usage Analysis**: Shows percentage of context window used and fit status
 - **Optimization Strategies**: Provides actionable recommendations for large codebases
 
@@ -173,10 +173,23 @@ This project includes automated GitHub workflows:
 
 ### 🔄 LLM Pricing Data Updates (`llm-pricing.yml`)
 
-- **Trigger**: Every 4 hours, on releases, or manual dispatch
-- **Purpose**: Automatically downloads and converts the latest LiteLLM pricing data
-- **Output**: Updates `llm_pricing_data.json` with current model pricing and context windows
+- **Trigger**: Daily, on releases, or manual dispatch
+- **Purpose**: Downloads and converts the full LiteLLM pricing dataset for publication
+- **Output**: Updates the separate `llm_pricing_data.json` pricing artifact; runtime context comparisons use the bundled registry instead
 - **Smart Updates**: Only processes when LiteLLM data actually changes
+
+The bundled context-window registry is a curated snapshot of LiteLLM commit
+[`3d0fd127`](https://github.com/BerriAI/litellm/commit/3d0fd127d5a151f7f094462b16ac9c2a01a047b6)
+from 2026-09-17. The selected families and limits were cross-checked against the
+[OpenAI](https://developers.openai.com/api/docs/models),
+[Anthropic](https://platform.claude.com/docs/en/models/overview),
+[Google](https://ai.google.dev/gemini-api/docs/models),
+[xAI](https://docs.x.ai/developers/models/grok-4.6),
+[DeepSeek](https://api-docs.deepseek.com/updates/),
+[Meta](https://ai.meta.com/llama/get-started/), and
+[Mistral](https://mistral.ai/models/) model documentation. LiteLLM's normalized
+input and output limits are used when a provider documents only a combined
+context window.
 
 ### 🧪 CI/CD Pipeline (`ci.yml`)
 
@@ -478,57 +491,42 @@ Total tokens: 1.4M (1,364,450)
 │ utils/ai/services/device_audio_integrator.lua    │   7,565 │       0.6% │
 └──────────────────────────────────────────────────┴─────────┴────────────┘
                                                                                
-                          Context Window Comparisons                           
-┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━┓
-┃ Model               ┃ Input Limit ┃ Input Usage ┃ Output Limit ┃   Status   ┃
-┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━┩
-│ Anthropic           │             │             │              │            │
-│   Claude 3.5 Haiku  │        200K │      682.2% │           8K │ ❌ Too Big │
-│   Claude 3.5 Sonnet │        200K │      682.2% │           8K │ ❌ Too Big │
-│   Claude 3.7 Sonnet │        200K │      682.2% │         128K │ ❌ Too Big │
-│   Claude 4 Opus     │        200K │      682.2% │          32K │ ❌ Too Big │
-│   Claude 4 Sonnet   │        200K │      682.2% │          64K │ ❌ Too Big │
-│ OpenAI              │             │             │              │            │
-│   GPT-4.1           │        1.0M │      130.2% │          33K │  ⚠️  Tight  │
-│   GPT-4.1 Mini      │        1.0M │      130.2% │          33K │  ⚠️  Tight  │
-│   GPT-4.1 Nano      │        1.0M │      130.2% │          33K │  ⚠️  Tight  │
-│   o1                │        200K │      682.2% │         100K │ ❌ Too Big │
-│   o3                │        200K │      682.2% │         100K │ ❌ Too Big │
-│   o3-mini           │        200K │      682.2% │         100K │ ❌ Too Big │
-│   o4-mini           │        200K │      682.2% │         100K │ ❌ Too Big │
-│   GPT-4o            │        128K │     1066.0% │          16K │ ❌ Too Big │
-│   GPT-4o Mini       │        128K │     1066.0% │          16K │ ❌ Too Big │
-│   o1-mini           │        128K │     1066.0% │          66K │ ❌ Too Big │
-│ Google              │             │             │              │            │
-│   Gemini 1.5 Pro    │        2.1M │       65.1% │           8K │  ✅ Fits   │
-│   Gemini Exp 1206   │        2.1M │       65.1% │           8K │  ✅ Fits   │
-│   Gemini 1.5 Flash  │        1.0M │      130.1% │           8K │  ⚠️  Tight  │
-│   Gemini 2.0 Flash  │        1.0M │      130.1% │           8K │  ⚠️  Tight  │
-│   Gemini 2.5 Flash  │        1.0M │      130.1% │          66K │  ⚠️  Tight  │
-│   Gemini 2.5 Pro    │        1.0M │      130.1% │          66K │  ⚠️  Tight  │
-│ xAI                 │             │             │              │            │
-│   Grok 2            │        131K │     1041.0% │         131K │ ❌ Too Big │
-│   Grok 3            │        131K │     1041.0% │         131K │ ❌ Too Big │
-│   Grok 3 Fast       │        131K │     1041.0% │         131K │ ❌ Too Big │
-│   Grok 3 Mini       │        131K │     1041.0% │         131K │ ❌ Too Big │
-│ Meta                │             │             │              │            │
-│   Llama 4 Scout     │       10.0M │       13.6% │        10.0M │  ✅ Fits   │
-│   Llama 4 Maverick  │        1.0M │      136.4% │         1.0M │  ⚠️  Tight  │
-│ DeepSeek            │             │             │              │            │
-│   DeepSeek Coder    │        128K │     1066.0% │           4K │ ❌ Too Big │
-│   DeepSeek Chat     │         66K │     2082.0% │           8K │ ❌ Too Big │
-│   DeepSeek Reasoner │         66K │     2082.0% │           8K │ ❌ Too Big │
-│ Mistral             │             │             │              │            │
-│   Mistral Medium    │        131K │     1041.0% │           8K │ ❌ Too Big │
-│   Mistral Devstral  │        128K │     1066.0% │         128K │ ❌ Too Big │
-│   Mistral Large     │        128K │     1066.0% │         128K │ ❌ Too Big │
-└─────────────────────┴─────────────┴─────────────┴──────────────┴────────────┘
+                            Context Window Comparisons
+┏━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━┓
+┃ Model                   ┃ Input Limit ┃ Input Usage ┃ Output Limit ┃   Status   ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━┩
+│ Anthropic               │             │             │              │            │
+│   Claude Fable 5.1      │        1.0M │      136.4% │         128K │  ⚠️  Tight  │
+│   Claude Opus 5         │        1.0M │      136.4% │         128K │  ⚠️  Tight  │
+│   Claude Sonnet 5       │        1.0M │      136.4% │         128K │  ⚠️  Tight  │
+│   Claude Haiku 4.5      │        200K │      682.2% │          64K │ ❌ Too Big │
+│ OpenAI                  │             │             │              │            │
+│   GPT-6 Astra           │        922K │      148.0% │         128K │  ⚠️  Tight  │
+│   GPT-5.6 Sol           │        922K │      148.0% │         128K │  ⚠️  Tight  │
+│   GPT-5.6 Terra         │        922K │      148.0% │         128K │  ⚠️  Tight  │
+│   GPT-5.6 Luna          │        922K │      148.0% │         128K │  ⚠️  Tight  │
+│ Google                  │             │             │              │            │
+│   Gemini 3.8 Flash      │        1.0M │      130.1% │          66K │  ⚠️  Tight  │
+│   Gemini 3.5 Flash-Lite │        1.0M │      130.1% │          66K │  ⚠️  Tight  │
+│   Gemini 2.5 Pro        │        1.0M │      130.1% │          66K │  ⚠️  Tight  │
+│ xAI                     │             │             │              │            │
+│   Grok 4.6              │        500K │      272.9% │         500K │ ❌ Too Big │
+│ Meta                    │             │             │              │            │
+│   Llama 4 Scout         │       10.0M │       13.6% │           4K │  ✅ Fits   │
+│   Llama 4 Maverick      │        1.0M │      136.4% │           4K │  ⚠️  Tight  │
+│ DeepSeek                │             │             │              │            │
+│   DeepSeek V4 Pro       │        1.0M │      136.4% │         393K │  ⚠️  Tight  │
+│   DeepSeek V4 Flash     │        1.0M │      136.4% │         393K │  ⚠️  Tight  │
+│ Mistral                 │             │             │              │            │
+│   Mistral Large         │        262K │      520.5% │         262K │ ❌ Too Big │
+│   Mistral Medium        │        262K │      520.5% │         262K │ ❌ Too Big │
+│   Devstral              │        256K │      533.0% │         256K │ ❌ Too Big │
+│   Devstral Small        │        256K │      533.0% │         256K │ ❌ Too Big │
+└─────────────────────────┴─────────────┴─────────────┴──────────────┴────────────┘
 
 🎯 Context Window Optimization Strategies
 
 ✅ Models that fit your entire codebase (1.4M tokens):
-  • Gemini 1.5 Pro
-  • Gemini Exp 1206
   • Llama 4 Scout
 
 🚨 LARGE CODEBASE STRATEGIES (1.4M tokens):
