@@ -1,0 +1,149 @@
+{
+  "snapshot": {
+    "source": "LiteLLM model_prices_and_context_window.json",
+    "commit": "3d0fd127d5a151f7f094462b16ac9c2a01a047b6",
+    "date": "2026-09-17"
+  },
+  "models": [
+    {
+      "provider": "Anthropic",
+      "model_id": "claude-fable-5-1",
+      "display_name": "Claude Fable 5.1",
+      "max_input_tokens": 1000000,
+      "max_output_tokens": 128000
+    },
+    {
+      "provider": "Anthropic",
+      "model_id": "claude-opus-5",
+      "display_name": "Claude Opus 5",
+      "max_input_tokens": 1000000,
+      "max_output_tokens": 128000
+    },
+    {
+      "provider": "Anthropic",
+      "model_id": "claude-sonnet-5",
+      "display_name": "Claude Sonnet 5",
+      "max_input_tokens": 1000000,
+      "max_output_tokens": 128000
+    },
+    {
+      "provider": "Anthropic",
+      "model_id": "claude-haiku-4-5",
+      "display_name": "Claude Haiku 4.5",
+      "max_input_tokens": 200000,
+      "max_output_tokens": 64000
+    },
+    {
+      "provider": "OpenAI",
+      "model_id": "gpt-6-astra",
+      "display_name": "GPT-6 Astra",
+      "max_input_tokens": 922000,
+      "max_output_tokens": 128000
+    },
+    {
+      "provider": "OpenAI",
+      "model_id": "gpt-5.6-sol",
+      "display_name": "GPT-5.6 Sol",
+      "max_input_tokens": 922000,
+      "max_output_tokens": 128000
+    },
+    {
+      "provider": "OpenAI",
+      "model_id": "gpt-5.6-terra",
+      "display_name": "GPT-5.6 Terra",
+      "max_input_tokens": 922000,
+      "max_output_tokens": 128000
+    },
+    {
+      "provider": "OpenAI",
+      "model_id": "gpt-5.6-luna",
+      "display_name": "GPT-5.6 Luna",
+      "max_input_tokens": 922000,
+      "max_output_tokens": 128000
+    },
+    {
+      "provider": "Google",
+      "model_id": "gemini-3.8-flash",
+      "display_name": "Gemini 3.8 Flash",
+      "max_input_tokens": 1048576,
+      "max_output_tokens": 65536
+    },
+    {
+      "provider": "Google",
+      "model_id": "gemini-3.5-flash-lite",
+      "display_name": "Gemini 3.5 Flash-Lite",
+      "max_input_tokens": 1048576,
+      "max_output_tokens": 65536
+    },
+    {
+      "provider": "Google",
+      "model_id": "gemini-2.5-pro",
+      "display_name": "Gemini 2.5 Pro",
+      "max_input_tokens": 1048576,
+      "max_output_tokens": 65536
+    },
+    {
+      "provider": "xAI",
+      "model_id": "grok-4.6",
+      "display_name": "Grok 4.6",
+      "max_input_tokens": 500000,
+      "max_output_tokens": 500000
+    },
+    {
+      "provider": "Meta",
+      "model_id": "meta-llama/Llama-4-Scout-17B-16E-Instruct",
+      "display_name": "Llama 4 Scout",
+      "max_input_tokens": 10000000,
+      "max_output_tokens": 4028
+    },
+    {
+      "provider": "Meta",
+      "model_id": "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
+      "display_name": "Llama 4 Maverick",
+      "max_input_tokens": 1000000,
+      "max_output_tokens": 4028
+    },
+    {
+      "provider": "DeepSeek",
+      "model_id": "deepseek-v4-pro",
+      "display_name": "DeepSeek V4 Pro",
+      "max_input_tokens": 1000000,
+      "max_output_tokens": 393216
+    },
+    {
+      "provider": "DeepSeek",
+      "model_id": "deepseek-v4-flash",
+      "display_name": "DeepSeek V4 Flash",
+      "max_input_tokens": 1000000,
+      "max_output_tokens": 393216
+    },
+    {
+      "provider": "Mistral",
+      "model_id": "mistral-large-latest",
+      "display_name": "Mistral Large",
+      "max_input_tokens": 262144,
+      "max_output_tokens": 262144
+    },
+    {
+      "provider": "Mistral",
+      "model_id": "mistral-medium-latest",
+      "display_name": "Mistral Medium",
+      "max_input_tokens": 262144,
+      "max_output_tokens": 262144
+    },
+    {
+      "provider": "Mistral",
+      "model_id": "devstral-latest",
+      "display_name": "Devstral",
+      "max_input_tokens": 256000,
+      "max_output_tokens": 256000
+    },
+    {
+      "provider": "Mistral",
+      "model_id": "devstral-small-latest",
+      "display_name": "Devstral Small",
+      "max_input_tokens": 256000,
+      "max_output_tokens": 256000
+    }
+  ]
+}
